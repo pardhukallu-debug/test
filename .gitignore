@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+ml-model/osm-venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE / OS
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Python tooling
+.pytest_cache/
+.mypy_cache/
+
+# ML temporary files
+*.log
+
+# Large raw datasets
+ml-model/data/raw/
+
+# Keep processed ML outputs
+# (Do not ignore data/processed/)
