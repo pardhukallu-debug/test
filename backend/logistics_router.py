@@ -19,34 +19,47 @@ class RouteRequest(BaseModel):
     transport_type: str = "truck"
     via: str = ""
 
+_GEOCODE_CACHE: dict = {}
+
 def geocode(place: str) -> tuple[float, float]:
     """
-    Resolve a city/place name to (longitude, latitude) using OpenStreetMap Nominatim.
-    Appends ', India' and uses countrycodes='in' by default for accurate regional geocoding.
+    Resolve a city/place name to (longitude, latitude) using Nominatim.
+    Caches results to avoid hitting Nominatim rate limit (1 req/sec).
     """
+    key = place.strip().lower()
+    if key in _GEOCODE_CACHE:
+        return _GEOCODE_CACHE[key]
+
     url = "https://nominatim.openstreetmap.org/search"
     q = place if "india" in place.lower() else f"{place}, India"
-    params = {
-        "q": q,
-        "format": "json",
-        "limit": 1,
-        "countrycodes": "in",
-    }
-    try:
-        resp = requests.get(url, params=params, headers=HEADERS, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        if data:
-            return float(data[0]["lon"]), float(data[0]["lat"])
 
-        # Fallback search without strict country filter
-        params_fb = {"q": place, "format": "json", "limit": 1}
-        resp_fb = requests.get(url, params=params_fb, headers=HEADERS, timeout=10)
-        data_fb = resp_fb.json()
-        if data_fb:
-            return float(data_fb[0]["lon"]), float(data_fb[0]["lat"])
-    except Exception as exc:
-        raise RuntimeError(f"Geocoding service error: {exc}")
+    for attempt in range(3):
+        try:
+            time.sleep(1.1)   # Nominatim strictly enforces 1 req/sec
+            params = {"q": q, "format": "json", "limit": 1, "countrycodes": "in"}
+            resp = requests.get(url, params=params, headers=HEADERS, timeout=12)
+            resp.raise_for_status()
+            data = resp.json()
+            if data:
+                result = (float(data[0]["lon"]), float(data[0]["lat"]))
+                _GEOCODE_CACHE[key] = result
+                return result
+
+            # Fallback without country filter
+            time.sleep(1.1)
+            params_fb = {"q": place, "format": "json", "limit": 1}
+            resp_fb = requests.get(url, params=params_fb, headers=HEADERS, timeout=12)
+            data_fb = resp_fb.json()
+            if data_fb:
+                result = (float(data_fb[0]["lon"]), float(data_fb[0]["lat"]))
+                _GEOCODE_CACHE[key] = result
+                return result
+
+        except Exception as exc:
+            if attempt == 2:
+                raise RuntimeError(f"Geocoding failed after 3 attempts: {exc}")
+            time.sleep(2)
+            continue
 
     raise ValueError(f"Location '{place}' not found. Try adding state/country (e.g. 'Guwahati, Assam').")
 
@@ -216,12 +229,10 @@ def get_routes(src: tuple[float, float], dst: tuple[float, float], via: tuple[fl
 def process_route_analysis(source_name: str, destination_name: str, transport_type: str = "truck", via_name: str = "") -> dict:
     """Complete route analysis pipeline: Geocoding -> Routing -> Response FeatureCollection."""
     src_coord = geocode(source_name)
-    time.sleep(0.4)
     dst_coord = geocode(destination_name)
 
     via_coord = None
     if via_name.strip():
-        time.sleep(0.4)
         via_coord = geocode(via_name)
 
     routes = get_routes(src_coord, dst_coord, via=via_coord, alternatives=3)
