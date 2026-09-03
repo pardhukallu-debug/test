@@ -252,7 +252,7 @@ def process_route_analysis(source_name: str, destination_name: str, transport_ty
         dist_km = round(route["distance"] / 1000, 1)
         dur_hrs = round(route["duration"] / 3600, 1)
 
-        time.sleep(0.3)
+        time.sleep(1.2)
         mid_label = reverse_geocode(coords[len(coords)//2][0], coords[len(coords)//2][1])
         waypoints = [source_name.split(",")[0].strip(), mid_label, destination_name.split(",")[0].strip()]
 

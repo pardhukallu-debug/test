@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { MapPin, Navigation as NavIcon, AlertTriangle, ShieldCheck, CloudRain, Mountain, Droplets, Map as MapIcon, Loader2, Navigation, Search } from 'lucide-react';
 import LogisticsMapNavigation from '../components/LogisticsMapNavigation';
@@ -24,6 +24,8 @@ export default function RoutePlanner() {
   const [mlStatus, setMlStatus] = useState('');
   const [routeInfo, setRouteInfo] = useState<any>(null);
   const [tripActive, setTripActive] = useState(false);
+  const sourceTimeout = useRef<any>(null);
+  const destTimeout = useRef<any>(null);
 
   const handleFindRoute = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -134,7 +136,37 @@ export default function RoutePlanner() {
     if (pct >= 50) return 'Moderate';
     return 'LOW';
   };
+  const handleSourceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setSource(val);
+    if (sourceTimeout.current) clearTimeout(sourceTimeout.current);
+    if (val.length >= 3) {
+      sourceTimeout.current = setTimeout(() => {
+        fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(val)}&format=json&limit=5&countrycodes=in`)
+          .then(res => res.json())
+          .then(data => setSourceSuggestions(data))
+          .catch(() => {});
+      }, 800);
+    } else {
+      setSourceSuggestions([]);
+    }
+  };
 
+  const handleDestChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setDestination(val);
+    if (destTimeout.current) clearTimeout(destTimeout.current);
+    if (val.length >= 3) {
+      destTimeout.current = setTimeout(() => {
+        fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(val)}&format=json&limit=5&countrycodes=in`)
+          .then(res => res.json())
+          .then(data => setDestSuggestions(data))
+          .catch(() => {});
+      }, 800);
+    } else {
+      setDestSuggestions([]);
+    }
+  };
   return (
     <div className="relative min-h-screen w-full flex flex-col pt-24 px-8 pb-8 overflow-hidden font-sans">
       {/* Background Image */}
@@ -168,17 +200,7 @@ export default function RoutePlanner() {
                 <input 
                   type="text" 
                   value={source}
-                  onChange={e => {
-                    setSource(e.target.value);
-                    if (e.target.value.length >= 3) {
-                      fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(e.target.value)}&format=json&limit=5&countrycodes=in`)
-                        .then(res => res.json())
-                        .then(data => setSourceSuggestions(data))
-                        .catch(() => {});
-                    } else {
-                      setSourceSuggestions([]);
-                    }
-                  }}
+                  onChange={handleSourceChange}
                   className="w-full bg-[#f8f9fa] border-[3px] border-black rounded-xl py-3 pl-10 pr-4 font-semibold text-black outline-none focus:bg-white transition-colors"
                   placeholder="Enter starting point"
                 />
@@ -208,17 +230,7 @@ export default function RoutePlanner() {
                 <input 
                   type="text" 
                   value={destination}
-                  onChange={e => {
-                    setDestination(e.target.value);
-                    if (e.target.value.length >= 3) {
-                      fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(e.target.value)}&format=json&limit=5&countrycodes=in`)
-                        .then(res => res.json())
-                        .then(data => setDestSuggestions(data))
-                        .catch(() => {});
-                    } else {
-                      setDestSuggestions([]);
-                    }
-                  }}
+                  onChange={handleDestChange}
                   className="w-full bg-[#f8f9fa] border-[3px] border-black rounded-xl py-3 pl-10 pr-4 font-semibold text-black outline-none focus:bg-white transition-colors"
                   placeholder="Enter destination"
                 />
