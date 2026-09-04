@@ -198,7 +198,9 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
   const [isSimulating, setIsSimulating] = useState(false);
   const [simSpeed, setSimSpeed] = useState(1);
   const currentCoordRef = useRef<[number, number] | null>(null);
+  const nextCoordRef = useRef<[number, number] | null>(null);
   const currentBearingRef = useRef<number>(0);
+  const currentScreenAngleRef = useRef<number>(0);
   const [vehiclePos, setVehiclePos] = useState<{ x: number; y: number; bearing: number } | null>(null);
   const [currentBearing, setCurrentBearing] = useState(0);
   const [isFollowing, setIsFollowing] = useState(true);
@@ -407,10 +409,27 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
       return;
     }
 
-    // Keep vehicle screen position synchronized with camera
+    // Keep vehicle screen position and screen angle synchronized with camera
     if (currentCoordRef.current) {
       const pt = m.project(currentCoordRef.current);
-      setVehiclePos({ x: pt.x, y: pt.y, bearing: currentBearingRef.current });
+      let screenAngle = currentScreenAngleRef.current;
+      if (
+        nextCoordRef.current &&
+        (nextCoordRef.current[0] !== currentCoordRef.current[0] ||
+          nextCoordRef.current[1] !== currentCoordRef.current[1])
+      ) {
+        const ptNext = m.project(nextCoordRef.current);
+        const dx = ptNext.x - pt.x;
+        const dy = ptNext.y - pt.y;
+        if (dx * dx + dy * dy > 0.04) {
+          screenAngle = (Math.atan2(dy, dx) * 180) / Math.PI + 90;
+          currentScreenAngleRef.current = screenAngle;
+        }
+      } else {
+        screenAngle = (currentBearingRef.current - m.getBearing() + 360) % 360;
+        currentScreenAngleRef.current = screenAngle;
+      }
+      setVehiclePos({ x: pt.x, y: pt.y, bearing: screenAngle });
     } else {
       setVehiclePos(null);
     }
@@ -685,6 +704,7 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
     const heading = next ? calculateBearing(curr[0], curr[1], next[0], next[1]) : currentBearing;
     setCurrentBearing(heading);
     currentCoordRef.current = curr;
+    nextCoordRef.current = next || null;
     currentBearingRef.current = heading;
 
     // Clean up DOM marker if it exists so only top SVG chevron renders
@@ -694,7 +714,21 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
     }
 
     const pt = m.project(curr);
-    setVehiclePos({ x: pt.x, y: pt.y, bearing: heading });
+    let screenAngle = currentScreenAngleRef.current;
+    if (next && (next[0] !== curr[0] || next[1] !== curr[1])) {
+      const ptNext = m.project(next);
+      const dx = ptNext.x - pt.x;
+      const dy = ptNext.y - pt.y;
+      if (dx * dx + dy * dy > 0.04) {
+        screenAngle = (Math.atan2(dy, dx) * 180) / Math.PI + 90;
+        currentScreenAngleRef.current = screenAngle;
+      }
+    } else {
+      screenAngle = (heading - m.getBearing() + 360) % 360;
+      currentScreenAngleRef.current = screenAngle;
+    }
+
+    setVehiclePos({ x: pt.x, y: pt.y, bearing: screenAngle });
 
     updateSvgOverlay();
 
@@ -779,7 +813,8 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
       if (dense.length > 0) {
         const m = map.current;
         if (m) m.jumpTo({ zoom: 15 });
-        updatePovPosition(dense[0] as [number, number], dense[1] as [number, number], 300);
+        const lookAhead = Math.min(dense.length - 1, 2);
+        updatePovPosition(dense[0] as [number, number], dense[lookAhead] as [number, number], 300);
       }
     } else {
       setIsSimulating(false);
@@ -790,6 +825,8 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
       }
       triggeredHazardIdsRef.current.clear();
       currentCoordRef.current = null;
+      nextCoordRef.current = null;
+      currentScreenAngleRef.current = 0;
       setVehiclePos(null);
       if (vehicleMarkerRef.current) { vehicleMarkerRef.current.remove(); vehicleMarkerRef.current = null; }
       if (map.current && features.length > 0) {
@@ -830,9 +867,10 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
 
       const next = Math.min(coords.length - 1, idx + stepIncrement);
       coordIdxRef.current = next;
+      const lookAhead = Math.min(coords.length - 1, next + Math.max(2, stepIncrement));
       updatePovPosition(
         coords[next] as [number, number],
-        (coords[next + 1] || coords[next]) as [number, number],
+        coords[lookAhead] as [number, number],
         ms
       );
 
