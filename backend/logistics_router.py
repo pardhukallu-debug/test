@@ -433,6 +433,15 @@ def process_route_analysis(source_name: str, destination_name: str, transport_ty
                 "hazards": hazards,
                 "segments": segments,
                 "risk_level": "High Risk" if rank == 0 else ("Low Risk" if rank == 1 else "Moderate Risk"),
+                "ml_data": {
+                    "risk_level": "High Risk" if rank == 0 else ("Low Risk" if rank == 1 else "Moderate Risk"),
+                    "rainfall_pct": 50 if rank == 0 else (10 if rank == 1 else 25),
+                    "landslide_pct": 75 if rank == 0 else (5 if rank == 1 else 20),
+                    "flood_pct": 70 if rank == 0 else (8 if rank == 1 else 18),
+                    "road_condition_pct": 20 if rank == 0 else (94 if rank == 1 else 72),
+                    "danger_pct": 80 if rank == 0 else (10 if rank == 1 else 28),
+                    "safe_pct": 20 if rank == 0 else (94 if rank == 1 else 72),
+                },
             },
         })
 
