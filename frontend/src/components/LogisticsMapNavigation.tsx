@@ -300,8 +300,52 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
             attribution: '&copy; OpenStreetMap Contributors',
             maxzoom: 19,
           },
+          'routes-base-source': {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [] },
+          },
+          'routes-segments-source': {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [] },
+          },
         },
-        layers: [{ id: 'osm', type: 'raster', source: 'osm' }],
+        layers: [
+          { id: 'osm', type: 'raster', source: 'osm' },
+          {
+            id: 'routes-base-glow',
+            type: 'line',
+            source: 'routes-base-source',
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: {
+              'line-color': ['coalesce', ['get', 'glow_color'], '#38bdf8'],
+              'line-width': ['case', ['get', 'is_active'], 16, 6],
+              'line-opacity': ['case', ['get', 'is_active'], 0.45, 0.2],
+              'line-blur': 6,
+            },
+          },
+          {
+            id: 'routes-base-line',
+            type: 'line',
+            source: 'routes-base-source',
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: {
+              'line-color': ['coalesce', ['get', 'line_color'], '#2563eb'],
+              'line-width': ['case', ['get', 'is_active'], 8, 4],
+              'line-opacity': ['case', ['get', 'is_active'], 1, 0.6],
+            },
+          },
+          {
+            id: 'routes-segments-line',
+            type: 'line',
+            source: 'routes-segments-source',
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: {
+              'line-color': ['coalesce', ['get', 'color'], '#ef4444'],
+              'line-width': ['case', ['get', 'is_high_risk'], 10, 7],
+              'line-opacity': 1,
+            },
+          },
+        ],
       },
       center: [91.7362, 26.1445],
       zoom: 7.5,
@@ -340,86 +384,46 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
     drawRoutes(m, features, selectedRouteId);
   }, [features, selectedRouteId]);
 
-  const ensureRouteLayers = (mapInstance: maplibregl.Map): boolean => {
-    if (!mapInstance.isStyleLoaded()) return false;
-
-    // 1. Base route source & layers
-    if (!mapInstance.getSource('routes-base-source')) {
-      mapInstance.addSource('routes-base-source', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-    }
-
-    if (!mapInstance.getLayer('routes-base-glow')) {
-      mapInstance.addLayer({
-        id: 'routes-base-glow',
-        type: 'line',
-        source: 'routes-base-source',
-        layout: { 'line-join': 'round', 'line-cap': 'round', 'visibility': 'visible' },
-        paint: {
-          'line-color': ['coalesce', ['get', 'glow_color'], '#38bdf8'],
-          'line-width': ['case', ['get', 'is_active'], 16, 6],
-          'line-opacity': ['case', ['get', 'is_active'], 0.45, 0.2],
-          'line-blur': 6,
-        },
-      });
-    }
-
-    if (!mapInstance.getLayer('routes-base-line')) {
-      mapInstance.addLayer({
-        id: 'routes-base-line',
-        type: 'line',
-        source: 'routes-base-source',
-        layout: { 'line-join': 'round', 'line-cap': 'round', 'visibility': 'visible' },
-        paint: {
-          'line-color': ['coalesce', ['get', 'line_color'], '#2563eb'],
-          'line-width': ['case', ['get', 'is_active'], 8, 4],
-          'line-opacity': ['case', ['get', 'is_active'], 1, 0.6],
-        },
-      });
-    }
-
-    // 2. Hazard segments source & layer
-    if (!mapInstance.getSource('routes-segments-source')) {
-      mapInstance.addSource('routes-segments-source', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-    }
-
-    if (!mapInstance.getLayer('routes-segments-line')) {
-      mapInstance.addLayer({
-        id: 'routes-segments-line',
-        type: 'line',
-        source: 'routes-segments-source',
-        layout: { 'line-join': 'round', 'line-cap': 'round', 'visibility': 'visible' },
-        paint: {
-          'line-color': ['coalesce', ['get', 'color'], '#ef4444'],
-          'line-width': ['case', ['get', 'is_high_risk'], 10, 7],
-          'line-opacity': 1,
-        },
-      });
-    }
-
-    return true;
-  };
-
   const drawRoutes = (m: maplibregl.Map, routeFeatures: RouteFeature[], activeId: string) => {
-    // Remove old markers
+    // 1. ALWAYS ADD START & END MARKERS & FIT BOUNDS (Never blocked)
     markersRef.current.forEach(mk => mk.remove());
     markersRef.current = [];
 
-    // Trigger map canvas resize to guarantee correct rendering dimensions
     try { m.resize(); } catch (_) {}
 
-    // Ensure layers are ready
-    if (!ensureRouteLayers(m)) {
-      m.once('styledata', () => drawRoutes(m, routeFeatures, activeId));
-      return;
+    const activeFeat = routeFeatures.find(f => f.properties.route_id === activeId) || routeFeatures[0];
+    if (activeFeat && activeFeat.geometry?.coordinates?.length >= 2) {
+      const coords = activeFeat.geometry.coordinates;
+      const wp = activeFeat.properties.waypoints || [];
+
+      const makeMarkerEl = (cls: string, label: string) => {
+        const el = document.createElement('div');
+        el.className = `custom-marker ${cls}`;
+        el.innerHTML = `<span>${label}</span>`;
+        return el;
+      };
+
+      markersRef.current.push(
+        new maplibregl.Marker({ element: makeMarkerEl('start-marker', `🟢 ${wp[0] || 'Start'}`) })
+          .setLngLat(coords[0] as [number, number])
+          .addTo(m)
+      );
+      markersRef.current.push(
+        new maplibregl.Marker({ element: makeMarkerEl('end-marker', `🚩 ${wp[wp.length - 1] || 'Destination'}`) })
+          .setLngLat(coords[coords.length - 1] as [number, number])
+          .addTo(m)
+      );
+
+      if (!tripActive) {
+        const bounds = coords.reduce(
+          (b: maplibregl.LngLatBounds, c: number[]) => b.extend(c as [number, number]),
+          new maplibregl.LngLatBounds(coords[0] as [number, number], coords[0] as [number, number])
+        );
+        m.fitBounds(bounds, { padding: 60, pitch: 20, duration: 1000 });
+      }
     }
 
-    // ── 1. POPULATE BASE ROUTES ──
+    // 2. PREPARE GEOJSON DATA
     const baseFeatures: any[] = [];
     routeFeatures.forEach(feature => {
       const coords = feature.geometry?.coordinates;
@@ -442,18 +446,7 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
       });
     });
 
-    const baseSrc = m.getSource('routes-base-source') as maplibregl.GeoJSONSource | undefined;
-    if (baseSrc && typeof baseSrc.setData === 'function') {
-      baseSrc.setData({
-        type: 'FeatureCollection',
-        features: baseFeatures,
-      });
-    }
-
-    // ── 2. POPULATE HAZARD / RISK SEGMENTS FOR ACTIVE ROUTE ──
-    const activeFeat = routeFeatures.find(f => f.properties.route_id === activeId) || routeFeatures[0];
     const segmentFeatures: any[] = [];
-
     if (activeFeat?.properties?.segments) {
       activeFeat.properties.segments.forEach(seg => {
         if (seg.coordinates && seg.coordinates.length >= 2) {
@@ -473,46 +466,32 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
       });
     }
 
-    const segSrc = m.getSource('routes-segments-source') as maplibregl.GeoJSONSource | undefined;
-    if (segSrc && typeof segSrc.setData === 'function') {
-      segSrc.setData({
-        type: 'FeatureCollection',
-        features: segmentFeatures,
-      });
-    }
+    // 3. SET DATA ON MAP SOURCES (Synchronously or on style load)
+    const updateSources = () => {
+      try {
+        const baseSrc = m.getSource('routes-base-source') as maplibregl.GeoJSONSource | undefined;
+        if (baseSrc && typeof baseSrc.setData === 'function') {
+          baseSrc.setData({
+            type: 'FeatureCollection',
+            features: baseFeatures,
+          });
+        }
+        const segSrc = m.getSource('routes-segments-source') as maplibregl.GeoJSONSource | undefined;
+        if (segSrc && typeof segSrc.setData === 'function') {
+          segSrc.setData({
+            type: 'FeatureCollection',
+            features: segmentFeatures,
+          });
+        }
+      } catch (err) {
+        console.warn('Map source update notice:', err);
+      }
+    };
 
-    // Add Start/End markers for active route
-    if (activeFeat && activeFeat.geometry.coordinates.length >= 2) {
-      const coords = activeFeat.geometry.coordinates;
-      const wp = activeFeat.properties.waypoints || [];
-
-      const makeMarkerEl = (cls: string, label: string) => {
-        const el = document.createElement('div');
-        el.className = `custom-marker ${cls}`;
-        el.innerHTML = `<span>${label}</span>`;
-        return el;
-      };
-
-      markersRef.current.push(
-        new maplibregl.Marker({ element: makeMarkerEl('start-marker', `🟢 ${wp[0] || 'Start'}`) })
-          .setLngLat(coords[0] as [number, number])
-          .addTo(m)
-      );
-      markersRef.current.push(
-        new maplibregl.Marker({ element: makeMarkerEl('end-marker', `🚩 ${wp[wp.length - 1] || 'End'}`) })
-          .setLngLat(coords[coords.length - 1] as [number, number])
-          .addTo(m)
-      );
-    }
-
-    // Fit map bounds
-    if (activeFeat && activeFeat.geometry.coordinates.length > 1 && !tripActive) {
-      const coords = activeFeat.geometry.coordinates;
-      const bounds = coords.reduce(
-        (b: maplibregl.LngLatBounds, c: number[]) => b.extend(c as [number, number]),
-        new maplibregl.LngLatBounds(coords[0] as [number, number], coords[0] as [number, number])
-      );
-      m.fitBounds(bounds, { padding: 60, pitch: 20, duration: 1200 });
+    if (m.isStyleLoaded()) {
+      updateSources();
+    } else {
+      m.once('load', updateSources);
     }
   };
 
