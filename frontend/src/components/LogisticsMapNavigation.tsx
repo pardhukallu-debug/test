@@ -345,121 +345,118 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
     markersRef.current.forEach(mk => mk.remove());
     markersRef.current = [];
 
-    // Clean up existing route layers/sources dynamically
-    const style = m.getStyle();
-    if (style && style.layers) {
-      style.layers.forEach(layer => {
-        if (layer.id.startsWith('route_') || layer.id.includes('_seg_')) {
-          try { m.removeLayer(layer.id); } catch (e) {}
+    // Helper: safely update or add GeoJSON source
+    const setOrAddSource = (sourceId: string, geojsonData: any) => {
+      try {
+        const existing = m.getSource(sourceId) as maplibregl.GeoJSONSource | undefined;
+        if (existing && typeof existing.setData === 'function') {
+          existing.setData(geojsonData);
+        } else {
+          m.addSource(sourceId, {
+            type: 'geojson',
+            data: geojsonData,
+          });
         }
-      });
-    }
-    if (style && style.sources) {
-      Object.keys(style.sources).forEach(sourceId => {
-        if (sourceId.startsWith('route_') || sourceId.includes('_seg_')) {
-          try { m.removeSource(sourceId); } catch (e) {}
+      } catch (err) {
+        console.warn('Source handling notice for:', sourceId, err);
+      }
+    };
+
+    // Helper: safely replace or add layer
+    const setOrAddLayer = (layerConfig: any) => {
+      try {
+        if (m.getLayer(layerConfig.id)) {
+          m.removeLayer(layerConfig.id);
         }
-      });
-    }
+        m.addLayer(layerConfig);
+      } catch (err) {
+        console.warn('Layer handling notice for:', layerConfig.id, err);
+      }
+    };
+
+    // Trigger map canvas resize to guarantee correct rendering
+    try { m.resize(); } catch (_) {}
 
     // Draw each route
     routeFeatures.forEach(feature => {
       const id = feature.properties.route_id;
       const isActive = id === activeId;
-      const segments = feature.properties.segments;
+      const coords = feature.geometry?.coordinates;
+      if (!coords || coords.length < 2) return;
 
+      // ── 1. SOLID BASE ROUTE LINE (Always drawn, guarantees full line visibility) ──
+      const baseSourceId = `${id}_base_path`;
+      const baseGlowId = `${baseSourceId}_glow`;
+      const baseLineId = `${baseSourceId}_line`;
+
+      setOrAddSource(baseSourceId, {
+        type: 'Feature',
+        geometry: feature.geometry,
+        properties: feature.properties,
+      });
+
+      const colors = getRiskLineColor(feature.properties.risk_level);
+      const routeBaseColor = isActive 
+        ? (feature.properties.color || colors.main) 
+        : '#64748b';
+      const routeGlowColor = isActive ? colors.glow : '#94a3b8';
+
+      setOrAddLayer({
+        id: baseGlowId,
+        type: 'line',
+        source: baseSourceId,
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+          'line-color': routeGlowColor,
+          'line-width': isActive ? 16 : 7,
+          'line-opacity': isActive ? 0.4 : 0.15,
+          'line-blur': 6,
+        },
+      });
+
+      setOrAddLayer({
+        id: baseLineId,
+        type: 'line',
+        source: baseSourceId,
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+          'line-color': routeBaseColor,
+          'line-width': isActive ? 8 : 4,
+          'line-opacity': isActive ? 0.95 : 0.5,
+        },
+      });
+
+      // ── 2. HAZARD / RISK SEGMENTS OVERLAY (Highlighted on top) ──
+      const segments = feature.properties.segments;
       if (segments && segments.length > 0) {
-        // Draw individual risk segments (Green for safe, Red for flood/landslide)
         segments.forEach((seg, sIdx) => {
+          if (!seg.coordinates || seg.coordinates.length < 2) return;
+
           const segSourceId = `${id}_seg_${sIdx}`;
-          const segGlowId = `${segSourceId}_glow`;
           const segLineId = `${segSourceId}_line`;
           const isHighRisk = seg.risk_level === 'High Risk';
           const isModRisk = seg.risk_level === 'Moderate Risk';
 
           const mainColor = seg.color || (isHighRisk ? '#ef4444' : isModRisk ? '#f59e0b' : '#10b981');
-          const glowColor = isHighRisk ? '#f87171' : isModRisk ? '#fbbf24' : '#34d399';
 
-          try {
-            m.addSource(segSourceId, {
-              type: 'geojson',
-              data: {
-                type: 'Feature',
-                geometry: { type: 'LineString', coordinates: seg.coordinates },
-                properties: { ...feature.properties, label: seg.label, risk_level: seg.risk_level },
-              } as any,
-            });
+          setOrAddSource(segSourceId, {
+            type: 'Feature',
+            geometry: { type: 'LineString', coordinates: seg.coordinates },
+            properties: { ...feature.properties, label: seg.label, risk_level: seg.risk_level },
+          });
 
-            // Outer glow
-            m.addLayer({
-              id: segGlowId,
-              type: 'line',
-              source: segSourceId,
-              layout: { 'line-join': 'round', 'line-cap': 'round' },
-              paint: {
-                'line-color': glowColor,
-                'line-width': isActive ? (isHighRisk ? 22 : 16) : 8,
-                'line-opacity': isActive ? (isHighRisk ? 0.65 : 0.35) : 0.15,
-                'line-blur': 6,
-              },
-            });
-
-            // Main segment line
-            m.addLayer({
-              id: segLineId,
-              type: 'line',
-              source: segSourceId,
-              layout: { 'line-join': 'round', 'line-cap': 'round' },
-              paint: {
-                'line-color': mainColor,
-                'line-width': isActive ? (isHighRisk ? 8 : 6) : 3,
-                'line-opacity': isActive ? 1 : 0.5,
-              },
-            });
-          } catch (err) {
-            console.error('Failed to add segment layer:', segSourceId, err);
-          }
+          setOrAddLayer({
+            id: segLineId,
+            type: 'line',
+            source: segSourceId,
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: {
+              'line-color': mainColor,
+              'line-width': isActive ? (isHighRisk ? 9 : 7) : 4,
+              'line-opacity': isActive ? 1 : 0.6,
+            },
+          });
         });
-      } else {
-        // Fallback single line
-        const colors = getRiskLineColor(feature.properties.risk_level);
-        try {
-          m.addSource(id, {
-            type: 'geojson',
-            data: {
-              type: 'Feature',
-              geometry: feature.geometry,
-              properties: feature.properties,
-            } as any,
-          });
-
-          m.addLayer({
-            id: `${id}-glow`,
-            type: 'line',
-            source: id,
-            layout: { 'line-join': 'round', 'line-cap': 'round' },
-            paint: {
-              'line-color': colors.glow,
-              'line-width': isActive ? 20 : 8,
-              'line-opacity': isActive ? 0.5 : 0.15,
-              'line-blur': 8,
-            },
-          });
-
-          m.addLayer({
-            id: `${id}-line`,
-            type: 'line',
-            source: id,
-            layout: { 'line-join': 'round', 'line-cap': 'round' },
-            paint: {
-              'line-color': colors.main,
-              'line-width': isActive ? 7 : 3,
-              'line-opacity': isActive ? 1 : 0.5,
-            },
-          });
-        } catch (err) {
-          console.error('Failed to add route layer:', id, err);
-        }
       }
     });
 
