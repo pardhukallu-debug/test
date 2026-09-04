@@ -340,128 +340,148 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
     drawRoutes(m, features, selectedRouteId);
   }, [features, selectedRouteId]);
 
+  const ensureRouteLayers = (mapInstance: maplibregl.Map): boolean => {
+    if (!mapInstance.isStyleLoaded()) return false;
+
+    // 1. Base route source & layers
+    if (!mapInstance.getSource('routes-base-source')) {
+      mapInstance.addSource('routes-base-source', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+    }
+
+    if (!mapInstance.getLayer('routes-base-glow')) {
+      mapInstance.addLayer({
+        id: 'routes-base-glow',
+        type: 'line',
+        source: 'routes-base-source',
+        layout: { 'line-join': 'round', 'line-cap': 'round', 'visibility': 'visible' },
+        paint: {
+          'line-color': ['coalesce', ['get', 'glow_color'], '#38bdf8'],
+          'line-width': ['case', ['get', 'is_active'], 16, 6],
+          'line-opacity': ['case', ['get', 'is_active'], 0.45, 0.2],
+          'line-blur': 6,
+        },
+      });
+    }
+
+    if (!mapInstance.getLayer('routes-base-line')) {
+      mapInstance.addLayer({
+        id: 'routes-base-line',
+        type: 'line',
+        source: 'routes-base-source',
+        layout: { 'line-join': 'round', 'line-cap': 'round', 'visibility': 'visible' },
+        paint: {
+          'line-color': ['coalesce', ['get', 'line_color'], '#2563eb'],
+          'line-width': ['case', ['get', 'is_active'], 8, 4],
+          'line-opacity': ['case', ['get', 'is_active'], 1, 0.6],
+        },
+      });
+    }
+
+    // 2. Hazard segments source & layer
+    if (!mapInstance.getSource('routes-segments-source')) {
+      mapInstance.addSource('routes-segments-source', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+    }
+
+    if (!mapInstance.getLayer('routes-segments-line')) {
+      mapInstance.addLayer({
+        id: 'routes-segments-line',
+        type: 'line',
+        source: 'routes-segments-source',
+        layout: { 'line-join': 'round', 'line-cap': 'round', 'visibility': 'visible' },
+        paint: {
+          'line-color': ['coalesce', ['get', 'color'], '#ef4444'],
+          'line-width': ['case', ['get', 'is_high_risk'], 10, 7],
+          'line-opacity': 1,
+        },
+      });
+    }
+
+    return true;
+  };
+
   const drawRoutes = (m: maplibregl.Map, routeFeatures: RouteFeature[], activeId: string) => {
     // Remove old markers
     markersRef.current.forEach(mk => mk.remove());
     markersRef.current = [];
 
-    // Helper: safely update or add GeoJSON source
-    const setOrAddSource = (sourceId: string, geojsonData: any) => {
-      try {
-        const existing = m.getSource(sourceId) as maplibregl.GeoJSONSource | undefined;
-        if (existing && typeof existing.setData === 'function') {
-          existing.setData(geojsonData);
-        } else {
-          m.addSource(sourceId, {
-            type: 'geojson',
-            data: geojsonData,
-          });
-        }
-      } catch (err) {
-        console.warn('Source handling notice for:', sourceId, err);
-      }
-    };
-
-    // Helper: safely replace or add layer
-    const setOrAddLayer = (layerConfig: any) => {
-      try {
-        if (m.getLayer(layerConfig.id)) {
-          m.removeLayer(layerConfig.id);
-        }
-        m.addLayer(layerConfig);
-      } catch (err) {
-        console.warn('Layer handling notice for:', layerConfig.id, err);
-      }
-    };
-
-    // Trigger map canvas resize to guarantee correct rendering
+    // Trigger map canvas resize to guarantee correct rendering dimensions
     try { m.resize(); } catch (_) {}
 
-    // Draw each route
+    // Ensure layers are ready
+    if (!ensureRouteLayers(m)) {
+      m.once('styledata', () => drawRoutes(m, routeFeatures, activeId));
+      return;
+    }
+
+    // ── 1. POPULATE BASE ROUTES ──
+    const baseFeatures: any[] = [];
     routeFeatures.forEach(feature => {
-      const id = feature.properties.route_id;
-      const isActive = id === activeId;
       const coords = feature.geometry?.coordinates;
       if (!coords || coords.length < 2) return;
 
-      // ── 1. SOLID BASE ROUTE LINE (Always drawn, guarantees full line visibility) ──
-      const baseSourceId = `${id}_base_path`;
-      const baseGlowId = `${baseSourceId}_glow`;
-      const baseLineId = `${baseSourceId}_line`;
+      const isActive = feature.properties.route_id === activeId;
+      const colors = getRiskLineColor(feature.properties.risk_level);
+      const color = isActive ? (feature.properties.color || colors.main) : '#64748b';
+      const glow = isActive ? colors.glow : '#94a3b8';
 
-      setOrAddSource(baseSourceId, {
+      baseFeatures.push({
         type: 'Feature',
         geometry: feature.geometry,
-        properties: feature.properties,
+        properties: {
+          ...feature.properties,
+          is_active: isActive,
+          line_color: color,
+          glow_color: glow,
+        }
       });
-
-      const colors = getRiskLineColor(feature.properties.risk_level);
-      const routeBaseColor = isActive 
-        ? (feature.properties.color || colors.main) 
-        : '#64748b';
-      const routeGlowColor = isActive ? colors.glow : '#94a3b8';
-
-      setOrAddLayer({
-        id: baseGlowId,
-        type: 'line',
-        source: baseSourceId,
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: {
-          'line-color': routeGlowColor,
-          'line-width': isActive ? 16 : 7,
-          'line-opacity': isActive ? 0.4 : 0.15,
-          'line-blur': 6,
-        },
-      });
-
-      setOrAddLayer({
-        id: baseLineId,
-        type: 'line',
-        source: baseSourceId,
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: {
-          'line-color': routeBaseColor,
-          'line-width': isActive ? 8 : 4,
-          'line-opacity': isActive ? 0.95 : 0.5,
-        },
-      });
-
-      // ── 2. HAZARD / RISK SEGMENTS OVERLAY (Highlighted on top) ──
-      const segments = feature.properties.segments;
-      if (segments && segments.length > 0) {
-        segments.forEach((seg, sIdx) => {
-          if (!seg.coordinates || seg.coordinates.length < 2) return;
-
-          const segSourceId = `${id}_seg_${sIdx}`;
-          const segLineId = `${segSourceId}_line`;
-          const isHighRisk = seg.risk_level === 'High Risk';
-          const isModRisk = seg.risk_level === 'Moderate Risk';
-
-          const mainColor = seg.color || (isHighRisk ? '#ef4444' : isModRisk ? '#f59e0b' : '#10b981');
-
-          setOrAddSource(segSourceId, {
-            type: 'Feature',
-            geometry: { type: 'LineString', coordinates: seg.coordinates },
-            properties: { ...feature.properties, label: seg.label, risk_level: seg.risk_level },
-          });
-
-          setOrAddLayer({
-            id: segLineId,
-            type: 'line',
-            source: segSourceId,
-            layout: { 'line-join': 'round', 'line-cap': 'round' },
-            paint: {
-              'line-color': mainColor,
-              'line-width': isActive ? (isHighRisk ? 9 : 7) : 4,
-              'line-opacity': isActive ? 1 : 0.6,
-            },
-          });
-        });
-      }
     });
 
-    // Add Start/End markers for active route
+    const baseSrc = m.getSource('routes-base-source') as maplibregl.GeoJSONSource | undefined;
+    if (baseSrc && typeof baseSrc.setData === 'function') {
+      baseSrc.setData({
+        type: 'FeatureCollection',
+        features: baseFeatures,
+      });
+    }
+
+    // ── 2. POPULATE HAZARD / RISK SEGMENTS FOR ACTIVE ROUTE ──
     const activeFeat = routeFeatures.find(f => f.properties.route_id === activeId) || routeFeatures[0];
+    const segmentFeatures: any[] = [];
+
+    if (activeFeat?.properties?.segments) {
+      activeFeat.properties.segments.forEach(seg => {
+        if (seg.coordinates && seg.coordinates.length >= 2) {
+          const isHighRisk = seg.risk_level === 'High Risk';
+          const isModRisk = seg.risk_level === 'Moderate Risk';
+          const segColor = seg.color || (isHighRisk ? '#ef4444' : isModRisk ? '#f59e0b' : '#10b981');
+
+          segmentFeatures.push({
+            type: 'Feature',
+            geometry: { type: 'LineString', coordinates: seg.coordinates },
+            properties: {
+              color: segColor,
+              is_high_risk: isHighRisk,
+            }
+          });
+        }
+      });
+    }
+
+    const segSrc = m.getSource('routes-segments-source') as maplibregl.GeoJSONSource | undefined;
+    if (segSrc && typeof segSrc.setData === 'function') {
+      segSrc.setData({
+        type: 'FeatureCollection',
+        features: segmentFeatures,
+      });
+    }
+
+    // Add Start/End markers for active route
     if (activeFeat && activeFeat.geometry.coordinates.length >= 2) {
       const coords = activeFeat.geometry.coordinates;
       const wp = activeFeat.properties.waypoints || [];
