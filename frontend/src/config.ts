@@ -1,6 +1,11 @@
 // Centralized application configuration
-// In production or when VITE_API_URL is provided, it uses the specified URL.
-// In development, if not provided, it falls back to http://localhost:8000.
+// Uses VITE_API_URL if provided, otherwise defaults to the deployed Render backend in production
+const envApiUrl = import.meta.env.VITE_API_URL as string | undefined;
+
 export const API_BASE_URL = 
-  (import.meta.env.VITE_API_URL as string | undefined) || 
-  (import.meta.env.PROD ? '' : 'http://localhost:8000');
+  (envApiUrl && envApiUrl.trim().length > 0)
+    ? envApiUrl.trim().replace(/\/$/, '')
+    : (import.meta.env.PROD 
+        ? 'https://smart-logistics-api-286r.onrender.com' 
+        : 'http://localhost:8000');
+
