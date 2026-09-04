@@ -203,6 +203,7 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
   const [currentBearing, setCurrentBearing] = useState(0);
   const [isFollowing, setIsFollowing] = useState(true);
   const [svgPaths, setSvgPaths] = useState<{ id: string; d: string; color: string; width: number; opacity: number; glow?: boolean }[]>([]);
+  const [markersPos, setMarkersPos] = useState<{ id: string; x: number; y: number; label: string; cls: string }[]>([]);
 
   const activeRoute = features.find(f => f.properties.route_id === selectedRouteId) || features[0];
 
@@ -402,6 +403,7 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
 
     if (!activeFeat?.geometry?.coordinates || activeFeat.geometry.coordinates.length < 2) {
       setSvgPaths([]);
+      setMarkersPos([]);
       return;
     }
 
@@ -411,6 +413,32 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
       setVehiclePos({ x: pt.x, y: pt.y, bearing: currentBearingRef.current });
     } else {
       setVehiclePos(null);
+    }
+
+    // Keep start and destination marker labels synchronized with camera (rendered above route lines)
+    if (activeFeat?.geometry?.coordinates && activeFeat.geometry.coordinates.length >= 2) {
+      const coords = activeFeat.geometry.coordinates;
+      const wp = activeFeat.properties.waypoints || [];
+      const startPt = m.project(coords[0] as [number, number]);
+      const endPt = m.project(coords[coords.length - 1] as [number, number]);
+      setMarkersPos([
+        {
+          id: 'start-marker',
+          x: startPt.x,
+          y: startPt.y,
+          label: `🟢 ${wp[0] || 'Start'}`,
+          cls: 'start-marker',
+        },
+        {
+          id: 'end-marker',
+          x: endPt.x,
+          y: endPt.y,
+          label: `🚩 ${wp[wp.length - 1] || 'Destination'}`,
+          cls: 'end-marker',
+        },
+      ]);
+    } else {
+      setMarkersPos([]);
     }
 
     const paths: { id: string; d: string; color: string; width: number; opacity: number; glow?: boolean }[] = [];
@@ -557,7 +585,7 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
   };
 
   const drawRoutes = (m: maplibregl.Map, routeFeatures: RouteFeature[], activeId: string) => {
-    // 1. ALWAYS ADD START & END MARKERS & FIT BOUNDS (Never blocked)
+    // 1. Clear legacy DOM markers and fit bounds
     markersRef.current.forEach(mk => mk.remove());
     markersRef.current = [];
 
@@ -566,25 +594,6 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
     const activeFeat = routeFeatures.find(f => f.properties.route_id === activeId) || routeFeatures[0];
     if (activeFeat && activeFeat.geometry?.coordinates?.length >= 2) {
       const coords = activeFeat.geometry.coordinates;
-      const wp = activeFeat.properties.waypoints || [];
-
-      const makeMarkerEl = (cls: string, label: string) => {
-        const el = document.createElement('div');
-        el.className = `custom-marker ${cls}`;
-        el.innerHTML = `<span>${label}</span>`;
-        return el;
-      };
-
-      markersRef.current.push(
-        new maplibregl.Marker({ element: makeMarkerEl('start-marker', `🟢 ${wp[0] || 'Start'}`) })
-          .setLngLat(coords[0] as [number, number])
-          .addTo(m)
-      );
-      markersRef.current.push(
-        new maplibregl.Marker({ element: makeMarkerEl('end-marker', `🚩 ${wp[wp.length - 1] || 'Destination'}`) })
-          .setLngLat(coords[coords.length - 1] as [number, number])
-          .addTo(m)
-      );
 
       if (!tripActive) {
         const bounds = coords.reduce(
@@ -964,6 +973,24 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
           </g>
         )}
       </svg>
+
+      {/* Route Marker Labels - Guaranteed Above Route Lines (z-20) */}
+      {markersPos.map(mk => (
+        <div
+          key={mk.id}
+          className={`custom-marker ${mk.cls}`}
+          style={{
+            position: 'absolute',
+            left: `${mk.x}px`,
+            top: `${mk.y}px`,
+            transform: 'translate(-50%, -50%)',
+            zIndex: 20,
+            pointerEvents: 'none',
+          }}
+        >
+          <span>{mk.label}</span>
+        </div>
+      ))}
 
       {tripActive && (
         <>
