@@ -199,6 +199,7 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
   const [simSpeed, setSimSpeed] = useState(1);
   const [currentBearing, setCurrentBearing] = useState(0);
   const [isFollowing, setIsFollowing] = useState(true);
+  const [svgPaths, setSvgPaths] = useState<{ id: string; d: string; color: string; width: number; opacity: number; glow?: boolean }[]>([]);
 
   const activeRoute = features.find(f => f.properties.route_id === selectedRouteId) || features[0];
 
@@ -317,9 +318,9 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
             source: 'routes-base-source',
             layout: { 'line-join': 'round', 'line-cap': 'round' },
             paint: {
-              'line-color': ['coalesce', ['get', 'glow_color'], '#38bdf8'],
-              'line-width': ['case', ['get', 'is_active'], 16, 6],
-              'line-opacity': ['case', ['get', 'is_active'], 0.45, 0.2],
+              'line-color': '#38bdf8',
+              'line-width': 14,
+              'line-opacity': 0.5,
               'line-blur': 6,
             },
           },
@@ -329,9 +330,9 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
             source: 'routes-base-source',
             layout: { 'line-join': 'round', 'line-cap': 'round' },
             paint: {
-              'line-color': ['coalesce', ['get', 'line_color'], '#2563eb'],
-              'line-width': ['case', ['get', 'is_active'], 8, 4],
-              'line-opacity': ['case', ['get', 'is_active'], 1, 0.6],
+              'line-color': '#2563eb',
+              'line-width': 8,
+              'line-opacity': 1,
             },
           },
           {
@@ -341,7 +342,7 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
             layout: { 'line-join': 'round', 'line-cap': 'round' },
             paint: {
               'line-color': ['coalesce', ['get', 'color'], '#ef4444'],
-              'line-width': ['case', ['get', 'is_high_risk'], 10, 7],
+              'line-width': 9,
               'line-opacity': 1,
             },
           },
@@ -361,6 +362,10 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
         setIsFollowing(false);
       }
     });
+
+    m.on('move', updateSvgOverlay);
+    m.on('zoom', updateSvgOverlay);
+    m.on('resize', updateSvgOverlay);
 
     m.on('load', () => {
       mapReady.current = true;
@@ -383,6 +388,92 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
     if (features.length === 0) return;
     drawRoutes(m, features, selectedRouteId);
   }, [features, selectedRouteId]);
+
+  const updateSvgOverlay = () => {
+    const m = map.current;
+    if (!m) return;
+
+    const feats = featuresRef.current;
+    const activeId = selectedRouteIdRef.current;
+    const activeFeat = feats.find(f => f.properties.route_id === activeId) || feats[0];
+
+    if (!activeFeat?.geometry?.coordinates || activeFeat.geometry.coordinates.length < 2) {
+      setSvgPaths([]);
+      return;
+    }
+
+    const paths: { id: string; d: string; color: string; width: number; opacity: number; glow?: boolean }[] = [];
+
+    const coordsToPath = (coords: number[][]) => {
+      let d = '';
+      for (let i = 0; i < coords.length; i++) {
+        const pt = m.project(coords[i] as [number, number]);
+        d += (i === 0 ? `M ${pt.x.toFixed(1)} ${pt.y.toFixed(1)}` : ` L ${pt.x.toFixed(1)} ${pt.y.toFixed(1)}`);
+      }
+      return d;
+    };
+
+    // 1. Inactive routes
+    feats.forEach(feat => {
+      if (feat.properties.route_id === activeId) return;
+      if (feat.geometry?.coordinates && feat.geometry.coordinates.length >= 2) {
+        const d = coordsToPath(feat.geometry.coordinates);
+        if (d) {
+          paths.push({
+            id: `inactive_${feat.properties.route_id}`,
+            d,
+            color: '#64748b',
+            width: 5,
+            opacity: 0.45,
+          });
+        }
+      }
+    });
+
+    // 2. Glowing blue base line for active route
+    const mainD = coordsToPath(activeFeat.geometry.coordinates);
+    if (mainD) {
+      paths.push({
+        id: 'active-glow',
+        d: mainD,
+        color: '#38bdf8',
+        width: 14,
+        opacity: 0.5,
+        glow: true,
+      });
+      paths.push({
+        id: 'active-line',
+        d: mainD,
+        color: activeFeat.properties.color || '#2563eb',
+        width: 8,
+        opacity: 0.95,
+      });
+    }
+
+    // 3. Disaster & hazard segments on top
+    if (activeFeat.properties.segments) {
+      activeFeat.properties.segments.forEach((seg, sIdx) => {
+        if (seg.coordinates && seg.coordinates.length >= 2) {
+          const segD = coordsToPath(seg.coordinates);
+          if (segD) {
+            const isHigh = seg.risk_level === 'High Risk';
+            const isMod = seg.risk_level === 'Moderate Risk';
+            const segColor = seg.color || (isHigh ? '#ef4444' : isMod ? '#f59e0b' : '#10b981');
+            paths.push({
+              id: `seg-${sIdx}`,
+              d: segD,
+              color: segColor,
+              width: isHigh ? 10 : 8,
+              opacity: 1,
+              glow: isHigh,
+            });
+          }
+        }
+      });
+    }
+
+    setSvgPaths(paths);
+  };
 
   const drawRoutes = (m: maplibregl.Map, routeFeatures: RouteFeature[], activeId: string) => {
     // 1. ALWAYS ADD START & END MARKERS & FIT BOUNDS (Never blocked)
@@ -493,6 +584,7 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
     } else {
       m.once('load', updateSources);
     }
+    updateSvgOverlay();
   };
 
   // ── POV NAVIGATION ──
@@ -726,6 +818,26 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
   return (
     <div className="logistics-map-wrapper">
       <div ref={mapContainer} className="logistics-map-container" />
+
+      {/* Guaranteed SVG Vector Route Line Overlay */}
+      <svg
+        className="pointer-events-none absolute inset-0 w-full h-full z-10 overflow-visible"
+        style={{ pointerEvents: 'none' }}
+      >
+        {svgPaths.map(p => (
+          <path
+            key={p.id}
+            d={p.d}
+            stroke={p.color}
+            strokeWidth={p.width}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            fill="none"
+            opacity={p.opacity}
+            style={p.glow ? { filter: `drop-shadow(0 0 6px ${p.color})` } : undefined}
+          />
+        ))}
+      </svg>
 
       {tripActive && (
         <>
