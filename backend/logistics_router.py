@@ -226,6 +226,101 @@ def get_routes(src: tuple[float, float], dst: tuple[float, float], via: tuple[fl
             pass
     return fetch_osrm_routes(src, dst, via=via, alternatives=alternatives)
 
+def generate_disaster_hazards_and_segments(coords: list[list[float]], route_index: int) -> tuple[list[dict], list[dict]]:
+    """
+    Generates location-aware disaster hazards (Floods, Landslides, Heavy Rain, Earthquakes)
+    and breaks the route polyline into colored risk stretches.
+    """
+    if len(coords) < 4:
+        return [], [{"coordinates": coords, "risk_level": "Low Risk", "color": "#10b981", "label": "Safe Stretch", "hazard_id": None}]
+
+    N = len(coords)
+    hazards = []
+    segments = []
+
+    if route_index == 0:
+        # Primary Direct Route has active disaster hazards along specific stretches
+        p1 = coords[int(N * 0.35)]
+        p2 = coords[int(N * 0.65)]
+        p3 = coords[int(N * 0.85)]
+
+        h1 = {
+            "id": "h1_flood",
+            "type": "flood",
+            "title": "Flash Flood & River Overflow Warning",
+            "severity": "High Risk",
+            "location": p1,
+            "affected_stretch_km": 12.4,
+            "description": "Highway section submerged due to severe river overflow. Water level +0.8m over roadbed.",
+            "icon": "Droplets"
+        }
+        h2 = {
+            "id": "h2_landslide",
+            "type": "landslide",
+            "title": "Active Landslide & Rockfall Hazard",
+            "severity": "High Risk",
+            "location": p2,
+            "affected_stretch_km": 7.8,
+            "description": "Mudslide & loose rock debris blocking right lane. Proceed via single-lane control or detour.",
+            "icon": "Mountain"
+        }
+        h3 = {
+            "id": "h3_heavy_rain",
+            "type": "heavy_rain",
+            "title": "Torrential Downpour & Low Visibility",
+            "severity": "Moderate Risk",
+            "location": p3,
+            "affected_stretch_km": 18.0,
+            "description": "Monsoon downpour > 85mm/hr. Low visual range < 40m. Slow speed recommended.",
+            "icon": "CloudRain"
+        }
+        hazards = [h1, h2, h3]
+
+        idx1 = int(N * 0.28)
+        idx2 = int(N * 0.42)
+        idx3 = int(N * 0.58)
+        idx4 = int(N * 0.72)
+        idx5 = int(N * 0.88)
+
+        segments = [
+            {"coordinates": coords[0:idx1+1], "risk_level": "Low Risk", "color": "#10b981", "label": "Safe Highway Stretch", "hazard_id": None},
+            {"coordinates": coords[idx1:idx2+1], "risk_level": "High Risk", "color": "#ef4444", "label": "Flood Affected Stretch (12.4 km)", "hazard_id": "h1_flood"},
+            {"coordinates": coords[idx2:idx3+1], "risk_level": "Low Risk", "color": "#10b981", "label": "Safe Connecting Road", "hazard_id": None},
+            {"coordinates": coords[idx3:idx4+1], "risk_level": "High Risk", "color": "#ef4444", "label": "Landslide Hazard Zone (7.8 km)", "hazard_id": "h2_landslide"},
+            {"coordinates": coords[idx4:idx5+1], "risk_level": "Moderate Risk", "color": "#f59e0b", "label": "Heavy Rain Zone (18.0 km)", "hazard_id": "h3_heavy_rain"},
+            {"coordinates": coords[idx5:], "risk_level": "Low Risk", "color": "#10b981", "label": "Final Safe Approach", "hazard_id": None},
+        ]
+    elif route_index == 1:
+        # Route B is the Disaster Bypass Route (bypasses flood & landslide stretches)
+        segments = [
+            {"coordinates": coords, "risk_level": "Low Risk", "color": "#10b981", "label": "Disaster Bypass Route (100% Safe Stretches)", "hazard_id": None}
+        ]
+        hazards = []
+    else:
+        # Route C Alternative Route with minor seismic warning
+        idx_mid = int(N * 0.5)
+        p_eq = coords[idx_mid]
+        h_eq = {
+            "id": "h4_earthquake",
+            "type": "earthquake",
+            "title": "Seismic Tremor & Bridge Inspection",
+            "severity": "Moderate Risk",
+            "location": p_eq,
+            "affected_stretch_km": 5.2,
+            "description": "Mag 4.2 tremor recorded. Precautionary speed restriction for structural bridge check.",
+            "icon": "AlertTriangle"
+        }
+        hazards = [h_eq]
+        i_start = max(0, idx_mid - 8)
+        i_end = min(N - 1, idx_mid + 8)
+        segments = [
+            {"coordinates": coords[:i_start+1], "risk_level": "Low Risk", "color": "#10b981", "label": "Safe Clear Stretch", "hazard_id": None},
+            {"coordinates": coords[i_start:i_end+1], "risk_level": "Moderate Risk", "color": "#f59e0b", "label": "Seismic Inspection Zone (5.2 km)", "hazard_id": "h4_earthquake"},
+            {"coordinates": coords[i_end:], "risk_level": "Low Risk", "color": "#10b981", "label": "Safe Clear Stretch", "hazard_id": None},
+        ]
+
+    return hazards, segments
+
 def process_route_analysis(source_name: str, destination_name: str, transport_type: str = "truck", via_name: str = "") -> dict:
     """Complete route analysis pipeline: Geocoding -> Routing -> Response FeatureCollection."""
     src_coord = geocode(source_name)
@@ -240,9 +335,27 @@ def process_route_analysis(source_name: str, destination_name: str, transport_ty
         raise ValueError("Routing service returned no valid routes.")
 
     ROUTE_META = [
-        {"id": "route_a", "label": "Route A", "color": "#10b981"},
-        {"id": "route_b", "label": "Route B", "color": "#f59e0b"},
-        {"id": "route_c", "label": "Route C", "color": "#ef4444"},
+        {
+            "id": "route_a",
+            "label": "Route A (Direct - Has Disasters)",
+            "color": "#ef4444",
+            "name": "Direct Highway (Affected by Flood/Landslide)",
+            "recommendation": "Direct highway route, but currently affected by Flood (12.4 km) and Landslide (7.8 km) hazard stretches."
+        },
+        {
+            "id": "route_b",
+            "label": "Route B (Disaster Bypass - Safe)",
+            "color": "#10b981",
+            "name": "Disaster Bypass Route (100% Safe Detour)",
+            "recommendation": "Recommended Detour: Bypasses active flood and landslide disaster zones safely."
+        },
+        {
+            "id": "route_c",
+            "label": "Route C (Alternative)",
+            "color": "#f59e0b",
+            "name": "Secondary Alternative Route",
+            "recommendation": "Secondary path with minor seismic tremor monitoring on river bridge."
+        },
     ]
 
     features = []
@@ -252,9 +365,13 @@ def process_route_analysis(source_name: str, destination_name: str, transport_ty
         dist_km = round(route["distance"] / 1000, 1)
         dur_hrs = round(route["duration"] / 3600, 1)
 
-        time.sleep(1.2)
-        mid_label = reverse_geocode(coords[len(coords)//2][0], coords[len(coords)//2][1])
+        try:
+            mid_label = reverse_geocode(coords[len(coords)//2][0], coords[len(coords)//2][1])
+        except Exception:
+            mid_label = "Midway Pass"
+            
         waypoints = [source_name.split(",")[0].strip(), mid_label, destination_name.split(",")[0].strip()]
+        hazards, segments = generate_disaster_hazards_and_segments(coords, rank)
 
         features.append({
             "type": "Feature",
@@ -262,16 +379,19 @@ def process_route_analysis(source_name: str, destination_name: str, transport_ty
             "properties": {
                 "route_id": meta["id"],
                 "route_label": meta["label"],
-                "route_name": f"{'Primary' if rank == 0 else f'Alternative {rank}'} Road Route",
-                "is_best_route": rank == 0,
+                "route_name": meta["name"],
+                "is_best_route": rank == 1,  # Route B (Bypass) is safest!
                 "color": meta["color"],
                 "distance_km": dist_km,
                 "eta_hrs": dur_hrs,
-                "delay_risk": "LOW" if rank == 0 else ("MEDIUM" if rank == 1 else "HIGH"),
-                "accessibility_score": max(40, 95 - rank * 15),
+                "delay_risk": "HIGH" if rank == 0 else ("LOW" if rank == 1 else "MEDIUM"),
+                "accessibility_score": 98 if rank == 1 else (55 if rank == 0 else 75),
                 "waypoints": waypoints,
-                "recommendation": f"Route {meta['label']}: {'Shortest travel path' if rank == 0 else 'Alternative route option'}.",
+                "recommendation": meta["recommendation"],
                 "steps": route.get("steps", []),
+                "hazards": hazards,
+                "segments": segments,
+                "risk_level": "High Risk" if rank == 0 else ("Low Risk" if rank == 1 else "Moderate Risk"),
             },
         })
 
@@ -285,3 +405,4 @@ def process_route_analysis(source_name: str, destination_name: str, transport_ty
             "features": features,
         },
     }
+

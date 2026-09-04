@@ -373,21 +373,6 @@ export default function RoutePlanner() {
                 </motion.button>
               )}
 
-              {/* Start/End Navigation Button */}
-              {routes.length > 0 && !tripActive && (
-                <motion.button
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  type="button"
-                  onClick={() => setTripActive(true)}
-                  className="w-full bg-blue-600 text-white border-[3px] border-blue-700 font-black tracking-widest text-base rounded-xl py-3 mt-1 flex items-center justify-center gap-3 transition-all shadow-[0_0_20px_rgba(37,99,235,0.4)] hover:bg-blue-700"
-                >
-                  <Navigation size={20} /> START NAVIGATION
-                </motion.button>
-              )}
-
               {tripActive && (
                 <motion.button
                   initial={{ opacity: 0, y: 10 }}
@@ -432,7 +417,29 @@ export default function RoutePlanner() {
               </div>
             )}
 
-
+            {/* Start Navigation Button at the Bottom of Map */}
+            {routes.length > 0 && !tripActive && !loading && (
+              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20">
+                <motion.button
+                  initial={{ opacity: 0, y: 20, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 20, scale: 0.95 }}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.96 }}
+                  type="button"
+                  onClick={() => setTripActive(true)}
+                  className="bg-blue-600 hover:bg-blue-500 text-white border-[3px] border-blue-400 font-black tracking-widest text-sm md:text-base rounded-2xl py-3.5 px-8 flex items-center justify-center gap-3 shadow-[0_10px_30px_rgba(37,99,235,0.6)] backdrop-blur-md transition-all cursor-pointer group uppercase whitespace-nowrap"
+                >
+                  <Navigation size={22} className="fill-white group-hover:rotate-12 transition-transform duration-200" />
+                  <span>START NAVIGATION</span>
+                  {currentActiveRoute?.properties?.distance_km && (
+                    <span className="bg-blue-800/80 text-blue-200 font-bold text-xs px-2.5 py-1 rounded-lg border border-blue-400/40">
+                      {currentActiveRoute.properties.distance_km} KM
+                    </span>
+                  )}
+                </motion.button>
+              </div>
+            )}
           </div>
 
           {/* 🔥 ML RISK KEY/VALUES (Floating Bottom Row) 🔥 */}

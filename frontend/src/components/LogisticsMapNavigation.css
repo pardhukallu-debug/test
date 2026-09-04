@@ -183,13 +183,15 @@
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.15);
   color: white;
-  width: 36px;
+  min-width: 40px;
   height: 36px;
-  border-radius: 50%;
+  padding: 0 6px;
+  border-radius: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 700;
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -214,3 +216,240 @@
 .btn-end-trip:hover {
   background: rgba(239, 68, 68, 0.4);
 }
+
+/* Recenter Button (shown when user pans away from the vehicle) */
+.btn-recenter {
+  position: absolute;
+  right: 20px;
+  bottom: 100px;
+  z-index: 100;
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(56, 189, 248, 0.6);
+  color: #fff;
+  padding: 10px 16px;
+  border-radius: 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.6), 0 0 16px rgba(56, 189, 248, 0.35);
+  animation: navSlideUp 0.25s ease-out;
+  transition: all 0.2s ease;
+}
+
+.btn-recenter:hover {
+  background: rgba(30, 41, 59, 0.95);
+  border-color: #60a5fa;
+}
+
+/* Disaster Warning Map Pins */
+.hazard-marker-pin {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #ffffff;
+  cursor: pointer;
+  box-shadow: 0 0 16px rgba(239, 68, 68, 0.6), 0 4px 12px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+  animation: hazardPulse 2s infinite alternate;
+  white-space: nowrap;
+}
+
+.hazard-pin-flood {
+  background: rgba(225, 29, 72, 0.92);
+  border: 2px solid #fda4af;
+}
+
+.hazard-pin-landslide {
+  background: rgba(217, 119, 6, 0.92);
+  border: 2px solid #fde68a;
+}
+
+.hazard-pin-heavy_rain {
+  background: rgba(2, 132, 199, 0.92);
+  border: 2px solid #7dd3fc;
+}
+
+.hazard-pin-earthquake {
+  background: rgba(168, 85, 247, 0.92);
+  border: 2px solid #e9d5ff;
+}
+
+@keyframes hazardPulse {
+  0% { transform: scale(1); box-shadow: 0 0 12px rgba(239, 68, 68, 0.5); }
+  100% { transform: scale(1.08); box-shadow: 0 0 24px rgba(239, 68, 68, 0.9); }
+}
+
+/* Glassmorphic Map Popup for Disaster Warnings */
+.disaster-popup-card {
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(16px);
+  border: 2px solid rgba(239, 68, 68, 0.7);
+  border-radius: 16px;
+  padding: 14px;
+  color: #fff;
+  max-width: 280px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.8), 0 0 20px rgba(239, 68, 68, 0.3);
+}
+
+.maplibregl-popup-content {
+  background: transparent !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+}
+
+.maplibregl-popup-tip {
+  border-top-color: rgba(15, 23, 42, 0.95) !important;
+}
+
+/* ── 5-Second Disaster Proximity Popup (Navigation Mode) ── */
+.nav-hazard-popup {
+  position: absolute;
+  top: 92px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 120;
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 2px solid #ef4444;
+  border-radius: 16px;
+  padding: 14px 16px;
+  box-shadow: 0 0 25px rgba(239, 68, 68, 0.5), 0 10px 30px rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  max-width: 440px;
+  width: 90vw;
+  overflow: hidden;
+  animation: hazardSlideDown 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes hazardSlideDown {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -15px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
+.hazard-timer-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: #ef4444;
+  box-shadow: 0 0 8px #ef4444;
+  border-bottom-left-radius: 16px;
+  border-bottom-right-radius: 16px;
+  animation: hazardTimer 5s linear forwards;
+}
+
+@keyframes hazardTimer {
+  from { width: 100%; }
+  to { width: 0%; }
+}
+
+.nav-hazard-icon-box {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.25);
+}
+
+.nav-hazard-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.nav-hazard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 3px;
+}
+
+.nav-hazard-badge {
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: #f87171;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  text-transform: uppercase;
+}
+
+.nav-hazard-close {
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  color: #94a3b8;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.nav-hazard-close:hover {
+  background: rgba(239, 68, 68, 0.4);
+  color: white;
+}
+
+.nav-hazard-title {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #ffffff;
+  line-height: 1.25;
+}
+
+.nav-hazard-desc {
+  font-size: 0.78rem;
+  color: #cbd5e1;
+  margin-top: 4px;
+  line-height: 1.35;
+}
+
+.nav-hazard-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #fca5a5;
+}
+
+.nav-hazard-severity {
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  color: #f87171;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-weight: 800;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+}
+
