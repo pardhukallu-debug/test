@@ -2,9 +2,16 @@ import os
 import sys
 from pydantic import BaseModel
 
-ml_src_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "ml-model", "src"))
-if ml_src_path not in sys.path:
-    sys.path.insert(0, ml_src_path)
+possible_paths = [
+    os.getenv("ML_MODEL_SRC"),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "ml-model", "src")),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "ml-model", "src")),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "ml-model", "src")),
+]
+for p in possible_paths:
+    if p and os.path.exists(p) and p not in sys.path:
+        sys.path.insert(0, p)
+        break
 
 try:
     from predict import predict_risk as _predict_risk

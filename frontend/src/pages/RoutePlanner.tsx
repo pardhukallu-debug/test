@@ -1,11 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, type FormEvent, type ChangeEvent } from 'react';
 import axios from 'axios';
-import { MapPin, Navigation as NavIcon, AlertTriangle, ShieldCheck, CloudRain, Mountain, Droplets, Map as MapIcon, Loader2, Navigation, ShieldAlert, RefreshCw, Zap } from 'lucide-react';
+import { MapPin, AlertTriangle, CloudRain, Mountain, Droplets, Map as MapIcon, Loader2, Navigation, ShieldAlert, RefreshCw, Zap } from 'lucide-react';
 import LogisticsMapNavigation from '../components/LogisticsMapNavigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
+import { API_BASE_URL } from '../config';
 
-const API = 'http://localhost:8000';
+const API = API_BASE_URL;
 
 export default function RoutePlanner() {
   const location = useLocation();
@@ -21,8 +22,6 @@ export default function RoutePlanner() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [riskData, setRiskData] = useState<any>(null);
-  const [mlStatus, setMlStatus] = useState('');
-  const [routeInfo, setRouteInfo] = useState<any>(null);
   const [tripActive, setTripActive] = useState(false);
   const sourceTimeout = useRef<any>(null);
   const destTimeout = useRef<any>(null);
@@ -33,7 +32,7 @@ export default function RoutePlanner() {
     }
   }, [destFromUrl]);
 
-  const handleFindRoute = async (e?: React.FormEvent) => {
+  const handleFindRoute = async (e?: FormEvent) => {
     e?.preventDefault();
     if (!source.trim() || !destination.trim()) {
       setError('Please enter both source and destination.');
@@ -44,7 +43,6 @@ export default function RoutePlanner() {
     setError('');
     setRiskData(null);
     setRoutes([]);
-    setMlStatus('Fetching route...');
     setTripActive(false);
 
     try {
@@ -65,7 +63,6 @@ export default function RoutePlanner() {
 
       setRoutes(routeFeatures);
       setSelectedRouteId(routeFeatures[0]?.properties?.route_id || 'route_a');
-      setMlStatus('Running ML risk prediction per route...');
 
       const riskLevels = ['High Risk', 'Low Risk', 'Moderate Risk'];
       const taggedFeatures = await Promise.all(routeFeatures.map(async (f: any, i: number) => {
@@ -97,10 +94,6 @@ export default function RoutePlanner() {
 
       setRoutes(taggedFeatures);
       setSelectedRouteId(taggedFeatures[0]?.properties?.route_id || 'route_a');
-      setRouteInfo({
-        source: res.data.source,
-        destination: res.data.destination,
-      });
       
       // Save for Weather page
       localStorage.setItem('lastRouteSource', JSON.stringify(res.data.source));
@@ -108,15 +101,11 @@ export default function RoutePlanner() {
       const bestML = taggedFeatures[0]?.properties?.ml_data;
       if (bestML) {
         setRiskData(bestML);
-        setMlStatus(`ML Prediction: ${bestML.risk_level}`);
-      } else {
-        setMlStatus('ML prediction complete');
       }
 
     } catch (err: any) {
-      const msg = err.response?.data?.detail || err.message || 'Failed to fetch route. Check if backend is running on port 8000.';
+      const msg = err.response?.data?.detail || err.message || 'Failed to fetch route. Check if backend is running.';
       setError(msg);
-      setMlStatus('');
     } finally {
       setLoading(false);
     }
@@ -133,7 +122,6 @@ export default function RoutePlanner() {
     const route = routes.find((r: any) => r.properties.route_id === routeId);
     if (route?.properties?.ml_data) {
       setRiskData(route.properties.ml_data);
-      setMlStatus(`ML Prediction: ${route.properties.ml_data.risk_level}`);
     }
   };
 
@@ -142,7 +130,7 @@ export default function RoutePlanner() {
     if (pct >= 50) return 'Moderate';
     return 'LOW';
   };
-  const handleSourceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSourceChange = (e: ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setSource(val);
     if (sourceTimeout.current) clearTimeout(sourceTimeout.current);
@@ -158,7 +146,7 @@ export default function RoutePlanner() {
     }
   };
 
-  const handleDestChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleDestChange = (e: ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setDestination(val);
     if (destTimeout.current) clearTimeout(destTimeout.current);

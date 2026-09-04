@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Activity, ShieldAlert, TrendingUp, Radio, AlertTriangle, CheckCircle2, BarChart3, PieChart } from 'lucide-react';
 

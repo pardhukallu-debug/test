@@ -185,12 +185,12 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
   const stepIndicesRef = useRef<number[]>([]);
   const tripActiveRef = useRef<boolean>(false);
   const followRef = useRef<boolean>(true);
+  const currentStepIdxRef = useRef<number>(0);
 
   const [activeHazardAlert, setActiveHazardAlert] = useState<RouteHazard | null>(null);
   const triggeredHazardIdsRef = useRef<Set<string>>(new Set());
   const hazardAlertTimeoutRef = useRef<number | null>(null);
 
-  const [currentStepIdx, setCurrentStepIdx] = useState(0);
   const [currentStep, setCurrentStep] = useState<RouteStep | null>(null);
   const [turnDistanceM, setTurnDistanceM] = useState<number>(0);
   const [remainingDistKm, setRemainingDistKm] = useState<number>(0);
@@ -306,7 +306,6 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
       center: [91.7362, 26.1445],
       zoom: 7.5,
       pitch: 20,
-      antialias: true,
     });
 
     m.addControl(new maplibregl.NavigationControl(), 'top-right');
@@ -536,7 +535,7 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
   useEffect(() => {
     if (tripActive && activeRoute) {
       setIsSimulating(true);
-      setCurrentStepIdx(0);
+      currentStepIdxRef.current = 0;
       followRef.current = true;
       setIsFollowing(true);
       triggeredHazardIdsRef.current.clear();
@@ -683,7 +682,7 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
 
         setCurrentStep(stepToDisplay);
         setTurnDistanceM(dM);
-        setCurrentStepIdx(nextManeuverIdx);
+        currentStepIdxRef.current = nextManeuverIdx;
 
         // Check proximity to disaster hazards along the route (within 1.2 km)
         const hazards = activeRoute?.properties?.hazards || [];

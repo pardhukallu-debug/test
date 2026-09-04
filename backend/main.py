@@ -11,17 +11,21 @@ load_dotenv()
 
 app = FastAPI(title="SIH Smart Logistics API")
 
-# Configure CORS for frontend communication
+# Configure CORS: allow custom origins via ALLOWED_ORIGINS env var or allow all by default
+raw_origins = os.getenv("ALLOWED_ORIGINS", "*")
+allowed_origins = [o.strip() for o in raw_origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # For hackathon/development; restrict in production
+    allow_origins=allowed_origins if allowed_origins else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 @app.get("/")
-def root():
+@app.get("/health")
+def health_check():
     return {"status": "ok", "message": "Smart Logistics API is running"}
 
 from api.weather import get_weather
@@ -56,3 +60,10 @@ def analyze_route(req: RouteRequest):
         raise HTTPException(status_code=404, detail=str(err))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    host = os.getenv("HOST", "0.0.0.0")
+    uvicorn.run("main:app", host=host, port=port, reload=False)
+
