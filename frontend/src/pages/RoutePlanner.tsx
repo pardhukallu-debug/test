@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { MapPin, Navigation as NavIcon, AlertTriangle, ShieldCheck, CloudRain, Mountain, Droplets, Map as MapIcon, Loader2, Navigation, Search } from 'lucide-react';
+import { MapPin, Navigation as NavIcon, AlertTriangle, ShieldCheck, CloudRain, Mountain, Droplets, Map as MapIcon, Loader2, Navigation, ShieldAlert, RefreshCw, Zap } from 'lucide-react';
 import LogisticsMapNavigation from '../components/LogisticsMapNavigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
@@ -12,8 +12,8 @@ export default function RoutePlanner() {
   const queryParams = new URLSearchParams(location.search);
   const destFromUrl = queryParams.get('dest');
 
-  const [source, setSource] = useState('Guwahati, Assam');
-  const [destination, setDestination] = useState(destFromUrl || 'Nagaon, Assam');
+  const [source, setSource] = useState('');
+  const [destination, setDestination] = useState('');
   const [sourceSuggestions, setSourceSuggestions] = useState<any[]>([]);
   const [destSuggestions, setDestSuggestions] = useState<any[]>([]);
   const [routes, setRoutes] = useState<any[]>([]);
@@ -26,6 +26,12 @@ export default function RoutePlanner() {
   const [tripActive, setTripActive] = useState(false);
   const sourceTimeout = useRef<any>(null);
   const destTimeout = useRef<any>(null);
+
+  useEffect(() => {
+    if (destFromUrl) {
+      setDestination(destFromUrl);
+    }
+  }, [destFromUrl]);
 
   const handleFindRoute = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -61,7 +67,7 @@ export default function RoutePlanner() {
       setSelectedRouteId(routeFeatures[0]?.properties?.route_id || 'route_a');
       setMlStatus('Running ML risk prediction per route...');
 
-      const riskLevels = ['Low Risk', 'Moderate Risk', 'High Risk'];
+      const riskLevels = ['High Risk', 'Low Risk', 'Moderate Risk'];
       const taggedFeatures = await Promise.all(routeFeatures.map(async (f: any, i: number) => {
         try {
           const mlRes = await axios.post(`${API}/api/ml/predict-risk`, {
@@ -167,8 +173,12 @@ export default function RoutePlanner() {
       setDestSuggestions([]);
     }
   };
+
+  const currentActiveRoute = routes.find((r: any) => r.properties.route_id === selectedRouteId) || routes[0];
+  const activeHazards = currentActiveRoute?.properties?.hazards || [];
+
   return (
-    <div className="relative min-h-screen w-full flex flex-col pt-24 px-8 pb-8 overflow-hidden font-sans">
+    <div className="relative h-screen w-full flex flex-col pt-20 px-6 pb-4 overflow-hidden font-sans">
       {/* Background Image */}
       <div 
         className="absolute inset-0 z-0 bg-cover bg-center"
@@ -177,31 +187,33 @@ export default function RoutePlanner() {
         <div className="absolute inset-0 bg-black/20" />
       </div>
 
-      <div className="relative z-10 w-full max-w-[1400px] mx-auto flex flex-col lg:flex-row gap-8 h-full flex-1">
+      <div className="relative z-10 w-full max-w-[1400px] mx-auto flex flex-col lg:flex-row gap-6 h-full flex-1 min-h-0">
         
-        {/* ── LEFT PANEL (Light theme as per mockup) ── */}
+        {/* ── LEFT PANEL ── */}
         <motion.div 
           initial={{ opacity: 0, x: -30 }}
           whileInView={{ opacity: 1, x: 0 }}
           viewport={{ once: true, margin: "-100px" }}
           transition={{ duration: 0.6, ease: "easeOut" }}
-          className="w-full lg:w-[420px] flex-shrink-0 bg-[#e8ecec]/95 backdrop-blur-md rounded-3xl border-[3px] border-black p-8 flex flex-col shadow-2xl"
+          className={`w-full flex-shrink-0 bg-[#e8ecec]/95 backdrop-blur-md rounded-3xl border-[3px] border-black p-5 flex flex-col shadow-2xl overflow-y-auto min-h-0 transition-all duration-500 ease-in-out ${
+            tripActive ? 'lg:w-[280px]' : 'lg:w-[390px]'
+          }`}
         >
-          <div className="mb-8">
-            <h1 className="text-4xl font-normal text-black tracking-wide mb-1">PLAN YOUR TRIP</h1>
-            <p className="text-xs font-bold text-black tracking-widest uppercase">Find the safest and smartest route</p>
+          <div className="mb-4">
+            <h1 className="text-2xl font-normal text-black tracking-wide mb-1">PLAN YOUR TRIP</h1>
+            <p className="text-xs font-bold text-black tracking-widest uppercase">Disaster-Aware Smart Rerouting</p>
           </div>
 
-          <form onSubmit={handleFindRoute} className="flex flex-col gap-6 flex-1">
-            <div className="flex flex-col gap-2 relative z-50">
-              <label className="font-bold text-lg text-black">FROM</label>
+          <form onSubmit={handleFindRoute} className="flex flex-col gap-4 flex-1">
+            <div className="flex flex-col gap-1.5 relative z-50">
+              <label className="font-bold text-base text-black">FROM</label>
               <div className="relative">
                 <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-black" size={20} />
                 <input 
                   type="text" 
                   value={source}
                   onChange={handleSourceChange}
-                  className="w-full bg-[#f8f9fa] border-[3px] border-black rounded-xl py-3 pl-10 pr-4 font-semibold text-black outline-none focus:bg-white transition-colors"
+                  className="w-full bg-[#f8f9fa] border-[3px] border-black rounded-xl py-2 pl-10 pr-4 font-semibold text-black outline-none focus:bg-white transition-colors"
                   placeholder="Enter starting point"
                 />
                 {sourceSuggestions.length > 0 && (
@@ -223,15 +235,15 @@ export default function RoutePlanner() {
               </div>
             </div>
 
-            <div className="flex flex-col gap-2 relative z-40">
-              <label className="font-bold text-lg text-black">TO</label>
+            <div className="flex flex-col gap-1.5 relative z-40">
+              <label className="font-bold text-base text-black">TO</label>
               <div className="relative">
                 <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-black" size={20} />
                 <input 
                   type="text" 
                   value={destination}
                   onChange={handleDestChange}
-                  className="w-full bg-[#f8f9fa] border-[3px] border-black rounded-xl py-3 pl-10 pr-4 font-semibold text-black outline-none focus:bg-white transition-colors"
+                  className="w-full bg-[#f8f9fa] border-[3px] border-black rounded-xl py-2 pl-10 pr-4 font-semibold text-black outline-none focus:bg-white transition-colors"
                   placeholder="Enter destination"
                 />
                 {destSuggestions.length > 0 && (
@@ -253,28 +265,38 @@ export default function RoutePlanner() {
               </div>
             </div>
 
+            {/* Alternate & Bypass Routes Selection */}
             {routes.length > 0 && (
-              <div className="mt-2 flex flex-col gap-3">
-                <label className="font-bold text-sm text-black uppercase">Alternate Routes</label>
-                <div className="flex flex-col gap-2">
-                  {routes.map((r: any, idx: number) => {
-                    const dotColor = idx === 0 ? 'bg-blue-500' : idx === 1 ? 'bg-emerald-500' : 'bg-amber-500';
+              <div className="mt-1 flex flex-col gap-2">
+                <label className="font-bold text-sm text-black uppercase">Route Options & Detours</label>
+                <div className="flex flex-col gap-2 max-h-36 overflow-y-auto pr-1">
+                  {routes.map((r: any) => {
+                    const isSelected = selectedRouteId === r.properties.route_id;
+                    const isBypass = r.properties.route_id === 'route_b';
+                    const isDirect = r.properties.route_id === 'route_a';
+                    const dotColor = isDirect ? 'bg-red-500' : isBypass ? 'bg-emerald-500' : 'bg-amber-500';
+
                     return (
                       <button
                         key={r.properties.route_id}
                         type="button"
                         onClick={() => handleSelectRoute(r.properties.route_id)}
-                        className={`flex justify-between items-center px-4 py-2 rounded-xl border-[2px] font-semibold text-sm transition-all ${
-                          selectedRouteId === r.properties.route_id
-                            ? 'bg-black text-white border-black'
-                            : 'bg-transparent text-black border-black hover:bg-black/10'
+                        className={`flex flex-col p-2.5 rounded-xl border-[2px] font-semibold text-xs transition-all text-left ${
+                          isSelected
+                            ? 'bg-black text-white border-black shadow-lg'
+                            : 'bg-white text-black border-black hover:bg-gray-100'
                         }`}
                       >
-                        <span className="flex items-center gap-2">
-                          <span className={`w-2.5 h-2.5 rounded-full ${dotColor}`} />
-                          {r.properties.route_label}
-                        </span>
-                        <span className="text-xs opacity-80">{r.properties.distance_km} km</span>
+                        <div className="flex justify-between items-center w-full mb-1">
+                          <span className="flex items-center gap-1.5 font-bold">
+                            <span className={`w-2.5 h-2.5 rounded-full ${dotColor}`} />
+                            {r.properties.route_label}
+                          </span>
+                          <span className="opacity-80 text-xs">{r.properties.distance_km} km</span>
+                        </div>
+                        <p className={`text-[11px] leading-tight ${isSelected ? 'text-gray-300' : 'text-gray-600'}`}>
+                          {r.properties.recommendation}
+                        </p>
                       </button>
                     );
                   })}
@@ -282,9 +304,53 @@ export default function RoutePlanner() {
               </div>
             )}
 
-            <div className="mt-auto pt-8 flex flex-col gap-3 relative z-0">
+            {/* 🔥 DISASTER HAZARD WARNINGS PANEL 🔥 */}
+            {routes.length > 0 && activeHazards.length > 0 && (
+              <div className="mt-2 p-3 bg-red-500/10 border-2 border-red-600/60 rounded-2xl flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-extrabold text-red-700 text-xs uppercase flex items-center gap-1.5">
+                    <ShieldAlert size={16} className="text-red-600" /> Active Hazards ({activeHazards.length})
+                  </span>
+                  <span className="text-[10px] bg-red-600 text-white font-black px-2 py-0.5 rounded-full uppercase">
+                    Hazard Stretches
+                  </span>
+                </div>
+
+                <div className="flex flex-col gap-1.5 max-h-28 overflow-y-auto">
+                  {activeHazards.map((h: any) => (
+                    <div key={h.id} className="p-2 bg-white/90 rounded-xl border border-red-200 text-black text-xs flex flex-col gap-0.5">
+                      <div className="flex justify-between items-center font-bold text-red-800">
+                        <span className="flex items-center gap-1">
+                          {h.type === 'flood' ? <Droplets size={14} className="text-red-500" /> :
+                           h.type === 'landslide' ? <Mountain size={14} className="text-amber-600" /> :
+                           h.type === 'heavy_rain' ? <CloudRain size={14} className="text-blue-500" /> :
+                           <Zap size={14} className="text-purple-600" />}
+                          {h.title}
+                        </span>
+                        <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-black">
+                          {h.affected_stretch_km} km
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-gray-700 leading-tight">{h.description}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {selectedRouteId === 'route_a' && (
+                  <button
+                    type="button"
+                    onClick={() => handleSelectRoute('route_b')}
+                    className="w-full mt-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2 px-3 rounded-xl border-2 border-emerald-800 flex items-center justify-center gap-1.5 shadow-md transition-all"
+                  >
+                    <RefreshCw size={14} className="animate-spin-slow" /> REROUTE AROUND DISASTERS (ROUTE B)
+                  </button>
+                )}
+              </div>
+            )}
+
+            <div className="mt-auto pt-2 flex flex-col gap-2 relative z-0">
               {error && (
-                <div className="flex items-start gap-2 text-red-600 font-bold mb-3 text-sm">
+                <div className="flex items-start gap-2 text-red-600 font-bold mb-1 text-sm">
                   <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
                   <span>{error}</span>
                 </div>
@@ -297,12 +363,12 @@ export default function RoutePlanner() {
                   whileTap={{ scale: 0.98 }}
                   type="submit"
                   disabled={loading}
-                  className="w-full bg-[#e8ecec] text-black border-[3px] border-black font-bold text-xl rounded-xl py-3 flex items-center justify-center gap-2 transition-all disabled:opacity-50 hover:bg-gray-200"
+                  className="w-full bg-[#e8ecec] text-black border-[3px] border-black font-bold text-base rounded-xl py-2.5 flex items-center justify-center gap-2 transition-all disabled:opacity-50 hover:bg-gray-200"
                 >
                   {loading ? (
-                    <><Loader2 size={20} className="animate-spin" /> Routing...</>
+                    <><Loader2 size={18} className="animate-spin" /> Analyzing Hazards...</>
                   ) : (
-                    <>Find Alternative Routes</>
+                    <>Find Safe Routes & Detours</>
                   )}
                 </motion.button>
               )}
@@ -316,9 +382,9 @@ export default function RoutePlanner() {
                   whileTap={{ scale: 0.98 }}
                   type="button"
                   onClick={() => setTripActive(true)}
-                  className="w-full bg-blue-600 text-white border-[3px] border-blue-700 font-black tracking-widest text-xl rounded-xl py-4 mt-2 flex items-center justify-center gap-3 transition-all shadow-[0_0_20px_rgba(37,99,235,0.4)] hover:bg-blue-700"
+                  className="w-full bg-blue-600 text-white border-[3px] border-blue-700 font-black tracking-widest text-base rounded-xl py-3 mt-1 flex items-center justify-center gap-3 transition-all shadow-[0_0_20px_rgba(37,99,235,0.4)] hover:bg-blue-700"
                 >
-                  <Navigation size={24} /> START NAVIGATION
+                  <Navigation size={20} /> START NAVIGATION
                 </motion.button>
               )}
 
@@ -330,7 +396,7 @@ export default function RoutePlanner() {
                   whileTap={{ scale: 0.98 }}
                   type="button"
                   onClick={() => setTripActive(false)}
-                  className="w-full bg-red-600 text-white border-[3px] border-red-700 font-black tracking-widest text-xl rounded-xl py-4 mt-2 flex items-center justify-center gap-3 transition-all shadow-lg hover:bg-red-700"
+                  className="w-full bg-red-600 text-white border-[3px] border-red-700 font-black tracking-widest text-base rounded-xl py-3 mt-1 flex items-center justify-center gap-3 transition-all shadow-lg hover:bg-red-700"
                 >
                   END TRIP
                 </motion.button>
@@ -345,49 +411,35 @@ export default function RoutePlanner() {
           whileInView={{ opacity: 1, scale: 1, y: 0 }}
           viewport={{ once: true, margin: "-100px" }}
           transition={{ duration: 0.7, delay: 0.2, ease: "easeOut" }}
-          className="flex-1 flex flex-col gap-6 relative z-0"
+          className="flex-1 flex flex-col gap-4 relative z-0 min-h-0"
         >
           {/* Map Area */}
-          <div className="flex-1 relative rounded-3xl overflow-hidden shadow-2xl border-[3px] border-black min-h-[500px]">
-            
-            {/* Mock Search Bar overlaying map */}
-            <div className="absolute top-4 left-4 z-20 w-64 bg-[#333]/90 backdrop-blur-md border border-gray-600 rounded-xl p-2 flex items-center shadow-lg pointer-events-none">
-               <Search size={16} className="text-gray-400 mx-2" />
-               <input type="text" placeholder="Search location..." className="bg-transparent text-sm text-white w-full outline-none" readOnly />
-            </div>
-
+          <div className="flex-1 relative rounded-3xl overflow-hidden shadow-2xl border-[3px] border-black min-h-0">
             <LogisticsMapNavigation 
               features={routes}
               selectedRouteId={selectedRouteId}
               tripActive={tripActive}
               onTripEnd={() => setTripActive(false)}
+              onSelectRoute={handleSelectRoute}
             />
             
             {loading && (
               <div className="absolute inset-0 bg-black/30 flex items-center justify-center z-20">
                 <div className="bg-white/90 text-black px-6 py-4 rounded-2xl shadow-xl text-center font-bold flex items-center gap-3">
                   <Loader2 size={24} className="animate-spin" />
-                  <span>Computing route...</span>
+                  <span>Computing segment hazards & detours...</span>
                 </div>
               </div>
             )}
 
-            {/* Mockup specific Risk Legend */}
-            <div className="absolute bottom-6 right-6 bg-[#2a2c33]/95 text-gray-300 rounded-xl p-4 shadow-2xl text-sm border border-gray-600">
-              <h4 className="font-bold text-white mb-2">Risk Level</h4>
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-emerald-500" /> Low Risk</div>
-                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-amber-500" /> Moderate Risk</div>
-                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-red-500" /> High Risk</div>
-              </div>
-            </div>
+
           </div>
 
           {/* 🔥 ML RISK KEY/VALUES (Floating Bottom Row) 🔥 */}
           <AnimatePresence mode="wait">
             {riskData && (
               <motion.div 
-                key={selectedRouteId} // Force re-animation when route changes
+                key={selectedRouteId}
                 className="grid grid-cols-4 gap-4 px-2"
               >
                 {[
@@ -396,8 +448,6 @@ export default function RoutePlanner() {
                   { label: 'Flood', icon: <Droplets size={24} className="mb-1 text-blue-300" />, pct: riskData.flood_pct, type: 'risk' },
                   { label: 'Road Safety', icon: <MapIcon size={24} className="mb-1 text-emerald-300" />, pct: riskData.road_condition_pct, type: 'safety' },
                 ].map(({ label, icon, pct, type }: any, index) => {
-                   
-                   // Explicitly distinct label for safety vs risk
                    const getSafetyLabel = (val: number) => val > 80 ? 'EXCELLENT' : val > 50 ? 'GOOD' : 'POOR';
                    
                    return (

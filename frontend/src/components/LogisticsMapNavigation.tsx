@@ -13,6 +13,25 @@ export interface RouteStep {
   location: [number, number];
 }
 
+export interface RouteHazard {
+  id: string;
+  type: 'flood' | 'landslide' | 'heavy_rain' | 'earthquake' | string;
+  title: string;
+  severity: 'High Risk' | 'Moderate Risk' | string;
+  location: [number, number];
+  affected_stretch_km: number;
+  description: string;
+  icon?: string;
+}
+
+export interface RouteSegment {
+  coordinates: number[][];
+  risk_level: string;
+  color: string;
+  label: string;
+  hazard_id: string | null;
+}
+
 export interface RouteFeature {
   type: 'Feature';
   geometry: { type: 'LineString'; coordinates: number[][] };
@@ -29,6 +48,8 @@ export interface RouteFeature {
     waypoints: string[];
     recommendation: string;
     steps?: RouteStep[];
+    hazards?: RouteHazard[];
+    segments?: RouteSegment[];
     risk_level?: string;    // 'Low Risk' | 'Moderate Risk' | 'High Risk'
     risk_color?: string;    // hex color from ML prediction
   };
@@ -39,6 +60,7 @@ export interface LogisticsMapProps {
   selectedRouteId: string;
   tripActive?: boolean;
   onTripEnd?: () => void;
+  onSelectRoute?: (routeId: string) => void;
 }
 
 const getRiskLineColor = (riskLevel?: string): { main: string; glow: string } => {
@@ -80,7 +102,6 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
   const map = useRef<maplibregl.Map | null>(null);
   const mapReady = useRef(false);
 
-  // ← These refs always hold latest values — no stale closure issues
   const featuresRef = useRef<RouteFeature[]>([]);
   const selectedRouteIdRef = useRef<string>(selectedRouteId);
   const markersRef = useRef<maplibregl.Marker[]>([]);
@@ -89,18 +110,21 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
   const animIntervalRef = useRef<number | null>(null);
   const coordIdxRef = useRef<number>(0);
   const interpolatedCoordsRef = useRef<number[][]>([]);
+  const tripActiveRef = useRef<boolean>(false);
+  const followRef = useRef<boolean>(true);
 
   const [currentStepIdx, setCurrentStepIdx] = useState(0);
   const [isSimulating, setIsSimulating] = useState(false);
   const [simSpeed, setSimSpeed] = useState(1);
   const [currentBearing, setCurrentBearing] = useState(0);
+  const [isFollowing, setIsFollowing] = useState(true);
 
   const activeRoute = features.find(f => f.properties.route_id === selectedRouteId) || features[0];
   const activeSteps = activeRoute?.properties.steps || [];
 
-  // Keep refs in sync
   featuresRef.current = features;
   selectedRouteIdRef.current = selectedRouteId;
+  tripActiveRef.current = tripActive;
 
   // ── MAP INIT (runs only once) ──
   useEffect(() => {
@@ -130,9 +154,15 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
     m.addControl(new maplibregl.NavigationControl(), 'top-right');
     map.current = m;
 
+    m.on('dragstart', () => {
+      if (tripActiveRef.current) {
+        followRef.current = false;
+        setIsFollowing(false);
+      }
+    });
+
     m.on('load', () => {
       mapReady.current = true;
-      // Draw any routes that arrived before map was ready
       if (featuresRef.current.length > 0) {
         drawRoutes(m, featuresRef.current, selectedRouteIdRef.current);
       }
@@ -158,90 +188,152 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
     markersRef.current.forEach(mk => mk.remove());
     markersRef.current = [];
 
-    // Clean up old layers/sources
-    ['route_a', 'route_b', 'route_c'].forEach(id => {
-      [`${id}-glow`, `${id}-line`].forEach(l => {
-        try { if (m.getLayer(l)) m.removeLayer(l); } catch (e) {}
+    // Clean up existing route layers/sources dynamically
+    const style = m.getStyle();
+    if (style && style.layers) {
+      style.layers.forEach(layer => {
+        if (layer.id.startsWith('route_') || layer.id.includes('_seg_')) {
+          try { m.removeLayer(layer.id); } catch (e) {}
+        }
       });
-      try { if (m.getSource(id)) m.removeSource(id); } catch (e) {}
-    });
+    }
+    if (style && style.sources) {
+      Object.keys(style.sources).forEach(sourceId => {
+        if (sourceId.startsWith('route_') || sourceId.includes('_seg_')) {
+          try { m.removeSource(sourceId); } catch (e) {}
+        }
+      });
+    }
 
     // Draw each route
     routeFeatures.forEach(feature => {
       const id = feature.properties.route_id;
       const isActive = id === activeId;
+      const segments = feature.properties.segments;
 
-      // Use ML risk color for the route line
-      const colors = getRiskLineColor(feature.properties.risk_level);
+      if (segments && segments.length > 0) {
+        // Draw individual risk segments (Green for safe, Red for flood/landslide)
+        segments.forEach((seg, sIdx) => {
+          const segSourceId = `${id}_seg_${sIdx}`;
+          const segGlowId = `${segSourceId}_glow`;
+          const segLineId = `${segSourceId}_line`;
+          const isHighRisk = seg.risk_level === 'High Risk';
+          const isModRisk = seg.risk_level === 'Moderate Risk';
 
-      try {
-        m.addSource(id, {
-          type: 'geojson',
-          data: {
-            type: 'Feature',
-            geometry: feature.geometry,
-            properties: feature.properties,
-          } as any,
+          const mainColor = seg.color || (isHighRisk ? '#ef4444' : isModRisk ? '#f59e0b' : '#10b981');
+          const glowColor = isHighRisk ? '#f87171' : isModRisk ? '#fbbf24' : '#34d399';
+
+          try {
+            m.addSource(segSourceId, {
+              type: 'geojson',
+              data: {
+                type: 'Feature',
+                geometry: { type: 'LineString', coordinates: seg.coordinates },
+                properties: { ...feature.properties, label: seg.label, risk_level: seg.risk_level },
+              } as any,
+            });
+
+            // Outer glow
+            m.addLayer({
+              id: segGlowId,
+              type: 'line',
+              source: segSourceId,
+              layout: { 'line-join': 'round', 'line-cap': 'round' },
+              paint: {
+                'line-color': glowColor,
+                'line-width': isActive ? (isHighRisk ? 22 : 16) : 8,
+                'line-opacity': isActive ? (isHighRisk ? 0.65 : 0.35) : 0.15,
+                'line-blur': 6,
+              },
+            });
+
+            // Main segment line
+            m.addLayer({
+              id: segLineId,
+              type: 'line',
+              source: segSourceId,
+              layout: { 'line-join': 'round', 'line-cap': 'round' },
+              paint: {
+                'line-color': mainColor,
+                'line-width': isActive ? (isHighRisk ? 8 : 6) : 3,
+                'line-opacity': isActive ? 1 : 0.5,
+              },
+            });
+          } catch (err) {
+            console.error('Failed to add segment layer:', segSourceId, err);
+          }
         });
+      } else {
+        // Fallback single line
+        const colors = getRiskLineColor(feature.properties.risk_level);
+        try {
+          m.addSource(id, {
+            type: 'geojson',
+            data: {
+              type: 'Feature',
+              geometry: feature.geometry,
+              properties: feature.properties,
+            } as any,
+          });
 
-        // Outer glow
-        m.addLayer({
-          id: `${id}-glow`,
-          type: 'line',
-          source: id,
-          layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: {
-            'line-color': colors.glow,
-            'line-width': isActive ? 20 : 8,
-            'line-opacity': isActive ? 0.5 : 0.15,
-            'line-blur': 8,
-          },
-        });
+          m.addLayer({
+            id: `${id}-glow`,
+            type: 'line',
+            source: id,
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: {
+              'line-color': colors.glow,
+              'line-width': isActive ? 20 : 8,
+              'line-opacity': isActive ? 0.5 : 0.15,
+              'line-blur': 8,
+            },
+          });
 
-        // Main line
-        m.addLayer({
-          id: `${id}-line`,
-          type: 'line',
-          source: id,
-          layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: {
-            'line-color': colors.main,
-            'line-width': isActive ? 7 : 3,
-            'line-opacity': isActive ? 1 : 0.5,
-          },
-        });
-      } catch (err) {
-        console.error('Failed to add route layer:', id, err);
+          m.addLayer({
+            id: `${id}-line`,
+            type: 'line',
+            source: id,
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: {
+              'line-color': colors.main,
+              'line-width': isActive ? 7 : 3,
+              'line-opacity': isActive ? 1 : 0.5,
+            },
+          });
+        } catch (err) {
+          console.error('Failed to add route layer:', id, err);
+        }
       }
     });
 
-    // Add start/end markers for active route
+    // Add Start/End markers for active route
     const activeFeat = routeFeatures.find(f => f.properties.route_id === activeId) || routeFeatures[0];
-    if (!activeFeat || activeFeat.geometry.coordinates.length < 2) return;
+    if (activeFeat && activeFeat.geometry.coordinates.length >= 2) {
+      const coords = activeFeat.geometry.coordinates;
+      const wp = activeFeat.properties.waypoints || [];
 
-    const coords = activeFeat.geometry.coordinates;
-    const wp = activeFeat.properties.waypoints || [];
+      const makeMarkerEl = (cls: string, label: string) => {
+        const el = document.createElement('div');
+        el.className = `custom-marker ${cls}`;
+        el.innerHTML = `<span>${label}</span>`;
+        return el;
+      };
 
-    const makeMarkerEl = (cls: string, label: string) => {
-      const el = document.createElement('div');
-      el.className = `custom-marker ${cls}`;
-      el.innerHTML = `<span>${label}</span>`;
-      return el;
-    };
+      markersRef.current.push(
+        new maplibregl.Marker({ element: makeMarkerEl('start-marker', `🟢 ${wp[0] || 'Start'}`) })
+          .setLngLat(coords[0] as [number, number])
+          .addTo(m)
+      );
+      markersRef.current.push(
+        new maplibregl.Marker({ element: makeMarkerEl('end-marker', `🚩 ${wp[wp.length - 1] || 'End'}`) })
+          .setLngLat(coords[coords.length - 1] as [number, number])
+          .addTo(m)
+      );
+    }
 
-    markersRef.current.push(
-      new maplibregl.Marker({ element: makeMarkerEl('start-marker', `🟢 ${wp[0] || 'Start'}`) })
-        .setLngLat(coords[0] as [number, number])
-        .addTo(m)
-    );
-    markersRef.current.push(
-      new maplibregl.Marker({ element: makeMarkerEl('end-marker', `🚩 ${wp[wp.length - 1] || 'End'}`) })
-        .setLngLat(coords[coords.length - 1] as [number, number])
-        .addTo(m)
-    );
-
-    // Fit map bounds to show full route
-    if (!tripActive) {
+    // Fit map bounds
+    if (activeFeat && activeFeat.geometry.coordinates.length > 1 && !tripActive) {
+      const coords = activeFeat.geometry.coordinates;
       const bounds = coords.reduce(
         (b: maplibregl.LngLatBounds, c: number[]) => b.extend(c as [number, number]),
         new maplibregl.LngLatBounds(coords[0] as [number, number], coords[0] as [number, number])
@@ -264,21 +356,42 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
     } else {
       vehicleMarkerRef.current.setLngLat(curr);
     }
-    m.easeTo({ center: curr, bearing: heading, pitch: 55, zoom: 15, duration: 200 });
+    if (followRef.current) {
+      m.easeTo({ center: curr, bearing: heading, pitch: 55, zoom: m.getZoom(), duration: 200 });
+    }
+  };
+
+  const handleRecenter = () => {
+    const m = map.current;
+    if (!m || !vehicleMarkerRef.current) return;
+    followRef.current = true;
+    setIsFollowing(true);
+    m.easeTo({
+      center: vehicleMarkerRef.current.getLngLat(),
+      bearing: currentBearing,
+      pitch: 55,
+      zoom: Math.max(m.getZoom(), 15),
+      duration: 600,
+    });
   };
 
   useEffect(() => {
     if (tripActive && activeRoute) {
       setIsSimulating(true);
       setCurrentStepIdx(0);
+      followRef.current = true;
+      setIsFollowing(true);
       const dense = interpolateCoords(activeRoute.geometry.coordinates, 8);
       interpolatedCoordsRef.current = dense;
       coordIdxRef.current = 0;
-      if (dense.length > 0) updatePovPosition(dense[0] as [number, number], dense[1] as [number, number]);
+      if (dense.length > 0) {
+        const m = map.current;
+        if (m) m.jumpTo({ zoom: 15 });
+        updatePovPosition(dense[0] as [number, number], dense[1] as [number, number]);
+      }
     } else {
       setIsSimulating(false);
       if (vehicleMarkerRef.current) { vehicleMarkerRef.current.remove(); vehicleMarkerRef.current = null; }
-      // Reset map view when trip ends
       if (map.current && features.length > 0) {
         drawRoutes(map.current, features, selectedRouteId);
       }
@@ -321,6 +434,15 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
               <div className="nav-turn-instruction">{currentStep.instruction}</div>
             </div>
           </div>
+
+          {!isFollowing && (
+            <button className="btn-recenter" onClick={handleRecenter} aria-label="Recenter on vehicle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path d="M12 2L4.5 20.29C4.19 21.05 4.95 21.81 5.71 21.5L12 18.5L18.29 21.5C19.05 21.81 19.81 21.05 19.5 20.29L12 2Z" fill="#38BDF8" stroke="#FFF" strokeWidth="1.8" strokeLinejoin="round"/>
+              </svg>
+              Recenter
+            </button>
+          )}
 
           <div className="nav-hud-bottom">
             <div className="nav-stat">
