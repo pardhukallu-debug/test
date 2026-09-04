@@ -197,6 +197,9 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
   const [remainingEtaHrs, setRemainingEtaHrs] = useState<number>(0);
   const [isSimulating, setIsSimulating] = useState(false);
   const [simSpeed, setSimSpeed] = useState(1);
+  const currentCoordRef = useRef<[number, number] | null>(null);
+  const currentBearingRef = useRef<number>(0);
+  const [vehiclePos, setVehiclePos] = useState<{ x: number; y: number; bearing: number } | null>(null);
   const [currentBearing, setCurrentBearing] = useState(0);
   const [isFollowing, setIsFollowing] = useState(true);
   const [svgPaths, setSvgPaths] = useState<{ id: string; d: string; color: string; width: number; opacity: number; glow?: boolean }[]>([]);
@@ -402,9 +405,18 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
       return;
     }
 
+    // Keep vehicle screen position synchronized with camera
+    if (currentCoordRef.current) {
+      const pt = m.project(currentCoordRef.current);
+      setVehiclePos({ x: pt.x, y: pt.y, bearing: currentBearingRef.current });
+    } else {
+      setVehiclePos(null);
+    }
+
     const paths: { id: string; d: string; color: string; width: number; opacity: number; glow?: boolean }[] = [];
 
     const coordsToPath = (coords: number[][]) => {
+      if (!coords || coords.length < 2) return '';
       let d = '';
       for (let i = 0; i < coords.length; i++) {
         const pt = m.project(coords[i] as [number, number]);
@@ -413,7 +425,7 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
       return d;
     };
 
-    // 1. Inactive routes
+    // 1. Inactive routes (subtle grey background)
     feats.forEach(feat => {
       if (feat.properties.route_id === activeId) return;
       if (feat.geometry?.coordinates && feat.geometry.coordinates.length >= 2) {
@@ -424,52 +436,121 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
             d,
             color: '#64748b',
             width: 5,
-            opacity: 0.45,
+            opacity: 0.35,
           });
         }
       }
     });
 
-    // 2. Glowing blue base line for active route
-    const mainD = coordsToPath(activeFeat.geometry.coordinates);
-    if (mainD) {
-      paths.push({
-        id: 'active-glow',
-        d: mainD,
-        color: '#38bdf8',
-        width: 14,
-        opacity: 0.5,
-        glow: true,
-      });
-      paths.push({
-        id: 'active-line',
-        d: mainD,
-        color: activeFeat.properties.color || '#2563eb',
-        width: 8,
-        opacity: 0.95,
-      });
-    }
+    const isDriving = tripActiveRef.current && interpolatedCoordsRef.current.length > 1;
+    const dense = interpolatedCoordsRef.current;
+    const currentIdx = Math.min(coordIdxRef.current, Math.max(0, dense.length - 1));
 
-    // 3. Disaster & hazard segments on top
-    if (activeFeat.properties.segments) {
-      activeFeat.properties.segments.forEach((seg, sIdx) => {
-        if (seg.coordinates && seg.coordinates.length >= 2) {
-          const segD = coordsToPath(seg.coordinates);
-          if (segD) {
-            const isHigh = seg.risk_level === 'High Risk';
-            const isMod = seg.risk_level === 'Moderate Risk';
-            const segColor = seg.color || (isHigh ? '#ef4444' : isMod ? '#f59e0b' : '#10b981');
+    if (isDriving) {
+      // 2a. Upcoming Route Portion (Ahead of Vehicle) - Glowing Vibrant Blue/Cyan
+      const upcomingCoords = dense.slice(currentIdx);
+      if (upcomingCoords.length >= 2) {
+        const upcomingD = coordsToPath(upcomingCoords);
+        if (upcomingD) {
+          paths.push({
+            id: 'upcoming-glow',
+            d: upcomingD,
+            color: '#38bdf8',
+            width: 14,
+            opacity: 0.5,
+            glow: true,
+          });
+          paths.push({
+            id: 'upcoming-line',
+            d: upcomingD,
+            color: activeFeat.properties.color || '#2563eb',
+            width: 8,
+            opacity: 0.95,
+          });
+        }
+      }
+
+      // 2b. Active Hazard & Disaster Segments
+      if (activeFeat.properties.segments) {
+        activeFeat.properties.segments.forEach((seg, sIdx) => {
+          if (seg.coordinates && seg.coordinates.length >= 2) {
+            const segD = coordsToPath(seg.coordinates);
+            if (segD) {
+              const isHigh = seg.risk_level === 'High Risk';
+              const isMod = seg.risk_level === 'Moderate Risk';
+              const segColor = seg.color || (isHigh ? '#ef4444' : isMod ? '#f59e0b' : '#10b981');
+              paths.push({
+                id: `seg-${sIdx}`,
+                d: segD,
+                color: segColor,
+                width: isHigh ? 10 : 8,
+                opacity: 1,
+                glow: isHigh,
+              });
+            }
+          }
+        });
+      }
+
+      // 2c. Traveled Route Portion (Passed Behind Vehicle) - Solid Grey on top of all passed stretches
+      if (currentIdx > 0) {
+        const traveledCoords = dense.slice(0, currentIdx + 1);
+        if (traveledCoords.length >= 2) {
+          const traveledD = coordsToPath(traveledCoords);
+          if (traveledD) {
             paths.push({
-              id: `seg-${sIdx}`,
-              d: segD,
-              color: segColor,
-              width: isHigh ? 10 : 8,
+              id: 'traveled-line',
+              d: traveledD,
+              color: '#64748b', // Slate grey
+              width: 8,
               opacity: 1,
-              glow: isHigh,
+              glow: false,
             });
           }
         }
-      });
+      }
+    } else {
+      // 2d. Before Driving Starts: Full Active Route
+      const mainD = coordsToPath(activeFeat.geometry.coordinates);
+      if (mainD) {
+        paths.push({
+          id: 'active-glow',
+          d: mainD,
+          color: '#38bdf8',
+          width: 14,
+          opacity: 0.5,
+          glow: true,
+        });
+        paths.push({
+          id: 'active-line',
+          d: mainD,
+          color: activeFeat.properties.color || '#2563eb',
+          width: 8,
+          opacity: 0.95,
+        });
+      }
+
+      // Disaster & Hazard Segments
+      if (activeFeat.properties.segments) {
+        activeFeat.properties.segments.forEach((seg, sIdx) => {
+          if (seg.coordinates && seg.coordinates.length >= 2) {
+            const segD = coordsToPath(seg.coordinates);
+            if (segD) {
+              const isHigh = seg.risk_level === 'High Risk';
+              const isMod = seg.risk_level === 'Moderate Risk';
+              const segColor = seg.color || (isHigh ? '#ef4444' : isMod ? '#f59e0b' : '#10b981');
+              paths.push({
+                id: `seg-${sIdx}`,
+                d: segD,
+                color: segColor,
+                width: isHigh ? 10 : 8,
+                opacity: 1,
+                glow: isHigh,
+              });
+            }
+          }
+        });
+      }
     }
 
     setSvgPaths(paths);
@@ -521,6 +602,7 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
       if (!coords || coords.length < 2) return;
 
       const isActive = feature.properties.route_id === activeId;
+      if (tripActive && isActive) return;
       const colors = getRiskLineColor(feature.properties.risk_level);
       const color = isActive ? (feature.properties.color || colors.main) : '#64748b';
       const glow = isActive ? colors.glow : '#94a3b8';
@@ -593,14 +675,20 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
     if (!m) return;
     const heading = next ? calculateBearing(curr[0], curr[1], next[0], next[1]) : currentBearing;
     setCurrentBearing(heading);
-    if (!vehicleMarkerRef.current) {
-      const el = document.createElement('div');
-      el.className = 'pov-vehicle-marker';
-      el.innerHTML = `<div class="google-nav-chevron"><svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M12 2L4.5 20.29C4.19 21.05 4.95 21.81 5.71 21.5L12 18.5L18.29 21.5C19.05 21.81 19.81 21.05 19.5 20.29L12 2Z" fill="#38BDF8" stroke="#FFF" stroke-width="1.8" stroke-linejoin="round"/></svg></div>`;
-      vehicleMarkerRef.current = new maplibregl.Marker({ element: el }).setLngLat(curr).addTo(m);
-    } else {
-      vehicleMarkerRef.current.setLngLat(curr);
+    currentCoordRef.current = curr;
+    currentBearingRef.current = heading;
+
+    // Clean up DOM marker if it exists so only top SVG chevron renders
+    if (vehicleMarkerRef.current) {
+      vehicleMarkerRef.current.remove();
+      vehicleMarkerRef.current = null;
     }
+
+    const pt = m.project(curr);
+    setVehiclePos({ x: pt.x, y: pt.y, bearing: heading });
+
+    updateSvgOverlay();
+
     if (followRef.current) {
       m.easeTo({ center: curr, bearing: heading, pitch: 55, zoom: m.getZoom(), duration: durationMs });
     }
@@ -608,12 +696,14 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
 
   const handleRecenter = () => {
     const m = map.current;
-    if (!m || !vehicleMarkerRef.current) return;
+    if (!m) return;
+    const targetCoord = currentCoordRef.current || (activeRoute?.geometry?.coordinates?.[0] as [number, number]);
+    if (!targetCoord) return;
     followRef.current = true;
     setIsFollowing(true);
     m.easeTo({
-      center: vehicleMarkerRef.current.getLngLat(),
-      bearing: currentBearing,
+      center: targetCoord,
+      bearing: currentBearingRef.current,
       pitch: 55,
       zoom: Math.max(m.getZoom(), 15),
       duration: 600,
@@ -690,6 +780,8 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
         hazardAlertTimeoutRef.current = null;
       }
       triggeredHazardIdsRef.current.clear();
+      currentCoordRef.current = null;
+      setVehiclePos(null);
       if (vehicleMarkerRef.current) { vehicleMarkerRef.current.remove(); vehicleMarkerRef.current = null; }
       if (map.current && features.length > 0) {
         drawRoutes(map.current, features, selectedRouteId);
@@ -723,6 +815,7 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
           modifier: '',
           location: coords[coords.length - 1] as [number, number],
         });
+        updateSvgOverlay();
         return;
       }
 
@@ -837,6 +930,39 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
             style={p.glow ? { filter: `drop-shadow(0 0 6px ${p.color})` } : undefined}
           />
         ))}
+
+        {/* 3D Navigation Vehicle Chevron - Always Rendered Above Route Lines */}
+        {tripActive && vehiclePos && (
+          <g
+            transform={`translate(${vehiclePos.x}, ${vehiclePos.y})`}
+          >
+            {/* Outer Cyan Pulse Glow Halo */}
+            <circle
+              r="26"
+              fill="rgba(56, 189, 248, 0.22)"
+              stroke="rgba(56, 189, 248, 0.45)"
+              strokeWidth="1.5"
+            />
+            {/* Dark Vehicle Base Puck */}
+            <circle
+              r="22"
+              fill="#0f172a"
+              stroke="#38bdf8"
+              strokeWidth="2.5"
+              style={{ filter: 'drop-shadow(0 4px 14px rgba(0, 0, 0, 0.85))' }}
+            />
+            {/* Rotating Directional Navigation Arrow */}
+            <g transform={`rotate(${vehiclePos.bearing})`}>
+              <path
+                d="M 0 -13 L -8 9 L 0 5 L 8 9 Z"
+                fill="#38BDF8"
+                stroke="#FFFFFF"
+                strokeWidth="1.8"
+                strokeLinejoin="round"
+              />
+            </g>
+          </g>
+        )}
       </svg>
 
       {tripActive && (
